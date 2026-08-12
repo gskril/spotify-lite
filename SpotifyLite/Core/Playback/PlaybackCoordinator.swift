@@ -103,6 +103,8 @@ actor PlaybackCoordinator {
     private var reconciliationTask: Task<Void, Never>?
     private var pendingSeekTask: Task<Void, Never>?
     private var pendingVolumeTask: Task<Void, Never>?
+    private var pendingSelectedTrackURI: String?
+    private var pendingSelectedTrackDeadline: ContinuousClock.Instant?
 
     nonisolated var events: AsyncStream<PlaybackCoordinatorEvent> { eventBus.stream() }
 
@@ -142,6 +144,17 @@ actor PlaybackCoordinator {
     @discardableResult
     func refresh() async throws -> PlaybackState? {
         let state = try await api.playbackState()
+        if let pendingSelectedTrackURI {
+            if state?.item?.uri == pendingSelectedTrackURI {
+                self.pendingSelectedTrackURI = nil
+                pendingSelectedTrackDeadline = nil
+            } else if let pendingSelectedTrackDeadline, clock.now < pendingSelectedTrackDeadline {
+                return currentPlayback()
+            } else {
+                self.pendingSelectedTrackURI = nil
+                pendingSelectedTrackDeadline = nil
+            }
+        }
         setPlayback(state)
         if let device = state?.device, device.name == receiverName {
             updateReceiver(device)
@@ -226,18 +239,51 @@ actor PlaybackCoordinator {
         }
     }
 
-    func playLocally(_ request: PlayRequest) async throws {
+    func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) async throws {
         try await serialized {
-            try await self.spotifyd.start()
-            let device = try await self.discoverReceiver()
-            guard let deviceID = device.id else {
-                throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: self.receiverName)
+            let previousPendingTrackURI = self.pendingSelectedTrackURI
+            let previousPendingTrackDeadline = self.pendingSelectedTrackDeadline
+            self.pendingSelectedTrackURI = preview?.uri
+            self.pendingSelectedTrackDeadline = preview == nil
+                ? nil
+                : self.clock.now.advanced(by: .seconds(12))
+            do {
+                try await self.optimistically(updating: { playback in
+                    if let preview {
+                        playback = PlaybackState(
+                            item: preview,
+                            progressMS: 0,
+                            isPlaying: true,
+                            device: playback?.device,
+                            shuffle: playback?.shuffle ?? false,
+                            repeatMode: playback?.repeatMode ?? .off
+                        )
+                    } else {
+                        playback?.isPlaying = true
+                    }
+                }) {
+                    try await self.spotifyd.start()
+                    let device = try await self.discoverReceiver()
+                    guard let deviceID = device.id else {
+                        throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: self.receiverName)
+                    }
+                    self.updateReceiver(device)
+                    self.serverPlayback?.device = device
+                    self.serverPlaybackTimestamp = self.clock.now
+                    self.eventBus.send(.stateChanged(self.serverPlayback))
+                    try await self.api.play(request, on: deviceID)
+                }
+            } catch {
+                self.pendingSelectedTrackURI = previousPendingTrackURI
+                self.pendingSelectedTrackDeadline = previousPendingTrackDeadline
+                throw error
             }
-            self.updateReceiver(device)
-            try await self.optimistically(updating: { $0?.isPlaying = true }) {
-                try await self.api.play(request, on: deviceID)
+            // The Web API playback state is eventually consistent after starting a new item.
+            // Keep a known clicked track visible until the regular reconciliation poll confirms it,
+            // rather than immediately replacing it with the previous server response.
+            if preview == nil {
+                try await self.refreshAfterCommandIfNeeded()
             }
-            try await self.refreshAfterCommandIfNeeded()
         }
     }
 

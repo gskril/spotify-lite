@@ -81,7 +81,7 @@ final class AppEnvironment: ObservableObject {
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) {
         runStartingPlayback(preview: preview) { coordinator in
-            try await coordinator.playLocally(request)
+            try await coordinator.playLocally(request, preview: preview)
         }
     }
 

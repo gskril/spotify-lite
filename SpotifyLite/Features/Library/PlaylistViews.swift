@@ -86,7 +86,10 @@ struct PlaylistDetailView: View {
 
                         Button {
                             isStartingPlaylist = true
-                            environment.playLocally(.context(uri: displayedPlaylist.uri))
+                            environment.playLocally(
+                                .context(uri: displayedPlaylist.uri),
+                                preview: tracks.first
+                            )
                             Task {
                                 try? await Task.sleep(for: .milliseconds(700))
                                 isStartingPlaylist = false

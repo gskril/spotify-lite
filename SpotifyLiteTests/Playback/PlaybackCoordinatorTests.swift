@@ -31,6 +31,80 @@ final class PlaybackCoordinatorTests: XCTestCase {
         ])
     }
 
+    func testKnownTrackUpdatesPlaybackImmediatelyWithoutReadingStaleServerState() async throws {
+        let device = makeDevice(id: "local-v1", active: true)
+        let oldTrack = makeTrack(id: "old", name: "Old song")
+        let selectedTrack = makeTrack(id: "selected", name: "Selected song")
+        let api = PlaybackAPISpy(
+            deviceResponses: [[device]],
+            playbackResponses: [
+                PlaybackState(
+                    item: oldTrack,
+                    progressMS: 30_000,
+                    isPlaying: true,
+                    device: device,
+                    shuffle: true,
+                    repeatMode: .context
+                ),
+                PlaybackState(
+                    item: oldTrack,
+                    progressMS: 31_000,
+                    isPlaying: true,
+                    device: device,
+                    shuffle: true,
+                    repeatMode: .context
+                ),
+                PlaybackState(
+                    item: selectedTrack,
+                    progressMS: 500,
+                    isPlaying: true,
+                    device: device,
+                    shuffle: true,
+                    repeatMode: .context
+                )
+            ],
+            operationDelay: .milliseconds(80)
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name
+        )
+
+        _ = try await coordinator.refresh()
+        async let command: Void = coordinator.playLocally(
+            .uris([selectedTrack.uri]),
+            preview: selectedTrack
+        )
+        try await waitForAPICall(api, prefix: "play:")
+
+        let playbackWhileCommandIsPending = await coordinator.currentPlayback()
+        XCTAssertEqual(playbackWhileCommandIsPending?.item, selectedTrack)
+        XCTAssertLessThan(playbackWhileCommandIsPending?.progressMS ?? .max, 1_000)
+        XCTAssertEqual(playbackWhileCommandIsPending?.isPlaying, true)
+        XCTAssertEqual(playbackWhileCommandIsPending?.shuffle, true)
+        XCTAssertEqual(playbackWhileCommandIsPending?.repeatMode, .context)
+
+        try await command
+        _ = try await coordinator.refresh()
+        let playbackAfterStaleRefresh = await coordinator.currentPlayback()
+        XCTAssertEqual(playbackAfterStaleRefresh?.item, selectedTrack)
+
+        _ = try await coordinator.refresh()
+        let confirmedPlayback = await coordinator.currentPlayback()
+        XCTAssertEqual(confirmedPlayback?.item, selectedTrack)
+        XCTAssertGreaterThanOrEqual(confirmedPlayback?.progressMS ?? 0, 500)
+
+        let calls = await api.calls
+        XCTAssertEqual(calls, [
+            "playback",
+            "devices",
+            "play:local-v1:uris(spotify:track:selected)",
+            "playback",
+            "playback"
+        ])
+    }
+
     func testResumeTransfersWaitsForActiveThenResumesInOrder() async throws {
         let inactive = makeDevice(id: "local-v1", active: false)
         let active = makeDevice(id: "local-v1", active: true)
@@ -319,12 +393,36 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
     }
 
+    private func makeTrack(id: String, name: String) -> SpotifyTrack {
+        SpotifyTrack(
+            id: id,
+            name: name,
+            uri: "spotify:track:\(id)",
+            durationMS: 180_000,
+            explicit: false,
+            artists: [SpotifyArtist(id: "artist", name: "Artist", uri: nil, images: nil)],
+            album: nil
+        )
+    }
+
     private func waitForPlaybackCalls(_ api: PlaybackAPISpy, count: Int) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(1))
         while await api.playbackCallCount() < count {
             guard clock.now < deadline else {
                 XCTFail("Timed out waiting for playback refresh")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func waitForAPICall(_ api: PlaybackAPISpy, prefix: String) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(1))
+        while !(await api.calls).contains(where: { $0.hasPrefix(prefix) }) {
+            guard clock.now < deadline else {
+                XCTFail("Timed out waiting for API call beginning with \(prefix)")
                 return
             }
             try await Task.sleep(for: .milliseconds(5))

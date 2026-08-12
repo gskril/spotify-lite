@@ -26,7 +26,7 @@ struct SearchView: View {
             Divider()
 
             if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                FeatureStateView(title: "Find your next listen", message: "Search Spotify's catalog for tracks, albums, artists, and playlists.", symbol: "sparkle.magnifyingglass")
+                emptySearchPrompt
             } else if isSearching {
                 LoadingView(message: "Searching Spotify…")
             } else if let errorMessage {
@@ -39,6 +39,26 @@ struct SearchView: View {
         }
         .onDisappear { searchTask?.cancel() }
         .onChange(of: environment.searchFocusRequest) { _, _ in searchFieldFocused = true }
+    }
+
+    private var emptySearchPrompt: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("Find your next listen")
+                    .font(.title2.bold())
+                Text("Search Spotify's catalog for tracks, albums, artists, and playlists.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 28)
+            .padding(.top, 44)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var isEmpty: Bool {
