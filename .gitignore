@@ -1,0 +1,20 @@
+.DS_Store
+.build/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+SpotifyLite.xcodeproj/project.xcworkspace/xcuserdata/
+SpotifyLite.xcodeproj/xcuserdata/
+dogfood-output/
+
+# Local configuration and environment files.
+.env
+.env.*
+*.p12
+*.mobileprovision
+
+# User credentials and generated daemon data never belong in source control.
+spotifyd.conf
+credentials.json

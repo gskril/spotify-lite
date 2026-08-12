@@ -1,0 +1,48 @@
+name: SpotifyLite
+options:
+  bundleIdPrefix: app.spotifylite
+  deploymentTarget:
+    macOS: "15.0"
+  defaultSourceDirectoryType: syncedFolder
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: NO
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  SpotifyLite:
+    type: application
+    platform: macOS
+    sources:
+      - path: SpotifyLite
+        type: syncedFolder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.spotifylite.SpotifyLite
+        PRODUCT_NAME: SpotifyLite
+        PRODUCT_MODULE_NAME: SpotifyLite
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Spotify Lite
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Personal, noncommercial Spotify client"
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        INFOPLIST_KEY_NSSupportsAutomaticGraphicsSwitching: YES
+        INFOPLIST_KEY_NSQuitAlwaysKeepsWindows: NO
+        INFOPLIST_KEY_ApplePersistenceIgnoreState: YES
+    scheme:
+      testTargets:
+        - SpotifyLiteTests
+  SpotifyLiteTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: SpotifyLiteTests
+        type: syncedFolder
+    dependencies:
+      - target: SpotifyLite
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.spotifylite.SpotifyLiteTests
+        GENERATE_INFOPLIST_FILE: YES
