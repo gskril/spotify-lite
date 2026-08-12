@@ -1,4 +1,5 @@
 import XCTest
+import MediaPlayer
 @testable import SpotifyLite
 
 final class FoundationTests: XCTestCase {
@@ -43,5 +44,40 @@ final class FoundationTests: XCTestCase {
         )
 
         XCTAssertEqual([image].artworkURL(forPointSize: 150), image.url)
+    }
+
+    @MainActor
+    func testSystemNowPlayingInfoContainsTrackState() {
+        let track = SpotifyTrack(
+            id: "track",
+            name: "A Song",
+            uri: "spotify:track:track",
+            durationMS: 240_000,
+            explicit: false,
+            artists: [SpotifyArtist(id: "artist", name: "An Artist", uri: nil, images: nil)],
+            album: SpotifyAlbumSummary(
+                id: "album",
+                name: "An Album",
+                uri: "spotify:album:album",
+                artists: [],
+                images: [],
+                releaseDate: nil
+            )
+        )
+        let info = SystemMediaController.nowPlayingInfo(for: PlaybackState(
+            item: track,
+            progressMS: 15_000,
+            isPlaying: true,
+            device: nil,
+            shuffle: false,
+            repeatMode: .off
+        ))
+
+        XCTAssertEqual(info?[MPMediaItemPropertyTitle] as? String, "A Song")
+        XCTAssertEqual(info?[MPMediaItemPropertyArtist] as? String, "An Artist")
+        XCTAssertEqual(info?[MPMediaItemPropertyAlbumTitle] as? String, "An Album")
+        XCTAssertEqual(info?[MPMediaItemPropertyPlaybackDuration] as? Double, 240)
+        XCTAssertEqual(info?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double, 15)
+        XCTAssertEqual(info?[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 1)
     }
 }

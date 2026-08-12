@@ -13,7 +13,9 @@ enum AppSessionState: Sendable, Equatable {
 final class AppEnvironment: ObservableObject {
     @Published var sessionState: AppSessionState = .needsSetup
     @Published var selectedDestination: AppDestination? = .home
-    @Published var playback: PlaybackState?
+    @Published var playback: PlaybackState? {
+        didSet { systemMediaController.update(playback: playback) }
+    }
     @Published var spotifydState: SpotifydState = .stopped
     @Published var alertMessage: String?
     @Published var presentedPlaylist: SpotifyPlaylistSummary?
@@ -24,6 +26,7 @@ final class AppEnvironment: ObservableObject {
     let api: any SpotifyAPIProviding
     let spotifyd: any SpotifydManaging
     let playbackCoordinator: PlaybackCoordinator
+    private let systemMediaController = SystemMediaController()
     private var keyboardMonitor: Any?
 
     init(
@@ -70,13 +73,34 @@ final class AppEnvironment: ObservableObject {
         }
     }
 
-    func togglePlayback() {
-        let wasPlaying = playback?.isPlaying == true
-        playback?.isPlaying = !wasPlaying
-        runPlaybackCommand(isPlaying: wasPlaying) { coordinator, isPlaying in
-            if isPlaying { try await coordinator.pause() }
-            else { try await coordinator.resume() }
+    func installSystemMediaCommands() {
+        systemMediaController.install { [weak self] command in
+            switch command {
+            case .play: self?.play()
+            case .pause: self?.pause()
+            case .togglePlayPause: self?.togglePlayback()
+            case .nextTrack: self?.skipNext()
+            case .previousTrack: self?.skipPrevious()
+            }
         }
+        systemMediaController.update(playback: playback)
+    }
+
+    func togglePlayback() {
+        if playback?.isPlaying == true { pause() }
+        else { play() }
+    }
+
+    func play() {
+        guard playback?.isPlaying != true else { return }
+        playback?.isPlaying = true
+        runPlaybackCommand { coordinator, _ in try await coordinator.play() }
+    }
+
+    func pause() {
+        guard playback?.isPlaying == true else { return }
+        playback?.isPlaying = false
+        runPlaybackCommand { coordinator, _ in try await coordinator.pause() }
     }
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) {
@@ -107,10 +131,9 @@ final class AppEnvironment: ObservableObject {
     }
 
     private func runPlaybackCommand(
-        isPlaying initialIsPlaying: Bool? = nil,
         _ operation: @escaping @Sendable (PlaybackCoordinator, Bool) async throws -> Void
     ) {
-        let isPlaying = initialIsPlaying ?? (playback?.isPlaying == true)
+        let isPlaying = playback?.isPlaying == true
         Task {
             do {
                 try await operation(playbackCoordinator, isPlaying)

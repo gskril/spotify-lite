@@ -312,6 +312,12 @@ actor PlaybackCoordinator {
         }
     }
 
+    func play() async throws {
+        try await withReceiverCommand(optimistic: { $0?.isPlaying = true }, refreshAfter: false) { deviceID in
+            try await self.api.play(.resume, on: deviceID)
+        }
+    }
+
     func next() async throws {
         try await withReceiverCommand { deviceID in try await self.api.next(on: deviceID) }
     }

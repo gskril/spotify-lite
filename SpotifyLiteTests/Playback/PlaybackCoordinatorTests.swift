@@ -166,6 +166,21 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, ["devices", "pause:fresh"])
     }
 
+    func testSystemPlayResumesTheCurrentlyActiveDevice() async throws {
+        let api = PlaybackAPISpy(deviceResponses: [[makeDevice(id: "active", active: true)]])
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: SpotifydManagerSpy(),
+            receiverName: "Spotify Lite — Test Mac",
+            configuration: .init(refreshAfterCommands: false)
+        )
+
+        try await coordinator.play()
+
+        let calls = await api.calls
+        XCTAssertEqual(calls, ["devices", "play:active:resume"])
+    }
+
     func testConcurrentCommandsAreSerialized() async throws {
         let api = PlaybackAPISpy(
             deviceResponses: [

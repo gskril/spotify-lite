@@ -32,6 +32,7 @@ struct RootView: View {
         .task { await observeReceiver() }
         .task { await observePlayback() }
         .task { environment.installKeyboardMonitor() }
+        .task { environment.installSystemMediaCommands() }
         .onChange(of: scenePhase, initial: true) { _, phase in
             Task {
                 await environment.playbackCoordinator.setObservationActivity(
