@@ -177,6 +177,19 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "spotify:track:abc")
     }
 
+    func testPlaybackQueueDecodesCurrentAndUpcomingTracksLossTolerantly() async throws {
+        let body = #"{"currently_playing":{"id":"now","name":"Now","uri":"spotify:track:now","duration_ms":100,"explicit":false,"artists":[]},"queue":[{"id":"next","name":"Next","uri":"spotify:track:next","duration_ms":200,"explicit":false,"artists":[]},null,{"type":"episode"}]}"#
+        let recorder = APIRequestRecorder(responses: [.init(status: 200, body: body)])
+        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
+        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
+
+        let queue = try await api.playbackQueue()
+
+        XCTAssertEqual(queue.currentlyPlaying?.id, "now")
+        XCTAssertEqual(queue.upcoming.map(\.id), ["next"])
+        XCTAssertEqual(recorder.requests.first?.url?.path, "/v1/me/player/queue")
+    }
+
     func testPlaylistDetailLoadsMetadataAndAllItemPagesLossTolerantly() async throws {
         let detail = #"{"id":"playlist","name":"Updated name","uri":"spotify:playlist:playlist","description":"Detail description","images":[],"items":{"items":[{"item":{"id":"one","name":"One","uri":"spotify:track:one","duration_ms":100,"explicit":false,"artists":[]}},null,{"item":null}],"next":"https://unit.test/v1/playlists/playlist/items?offset=3"}}"#
         let nextPage = #"{"items":[{"item":{"id":"two","name":"Two","uri":"spotify:track:two","duration_ms":200,"explicit":false,"artists":[]}},"unavailable"],"next":null}"#

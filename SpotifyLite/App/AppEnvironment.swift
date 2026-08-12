@@ -9,6 +9,14 @@ enum AppSessionState: Sendable, Equatable {
     case failure(String)
 }
 
+struct GeneratedMixPresentation: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let symbol: String
+    let tracks: [SpotifyTrack]
+}
+
 @MainActor
 final class AppEnvironment: ObservableObject {
     @Published var sessionState: AppSessionState = .needsSetup
@@ -19,6 +27,7 @@ final class AppEnvironment: ObservableObject {
     @Published var spotifydState: SpotifydState = .stopped
     @Published var alertMessage: String?
     @Published var presentedPlaylist: SpotifyPlaylistSummary?
+    @Published var presentedGeneratedMix: GeneratedMixPresentation?
     @Published private(set) var isStartingPlayback = false
     @Published private(set) var searchFocusRequest = UUID()
 
@@ -55,11 +64,31 @@ final class AppEnvironment: ObservableObject {
     }
 
     func presentPlaylist(_ playlist: SpotifyPlaylistSummary) {
+        presentedGeneratedMix = nil
         presentedPlaylist = playlist
     }
 
     func dismissPlaylist() {
         presentedPlaylist = nil
+    }
+
+    func presentGeneratedMix(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        tracks: [SpotifyTrack]
+    ) {
+        presentedPlaylist = nil
+        presentedGeneratedMix = GeneratedMixPresentation(
+            title: title,
+            subtitle: subtitle,
+            symbol: symbol,
+            tracks: tracks
+        )
+    }
+
+    func dismissGeneratedMix() {
+        presentedGeneratedMix = nil
     }
 
     func installKeyboardMonitor() {

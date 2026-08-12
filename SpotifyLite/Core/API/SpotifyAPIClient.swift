@@ -182,6 +182,17 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         }
     }
 
+    func playbackQueue() async throws -> PlaybackQueue {
+        let response = try await decode(
+            PlaybackQueueResponse.self,
+            from: Endpoint(method: "GET", path: "me/player/queue")
+        )
+        return PlaybackQueue(
+            currentlyPlaying: response.currentlyPlaying?.value,
+            upcoming: response.queue.compactMap(\.value)
+        )
+    }
+
     func devices() async throws -> [SpotifyDevice] {
         try await decode(DevicesResponse.self, from: Endpoint(method: "GET", path: "me/player/devices")).devices
     }
@@ -579,6 +590,16 @@ private struct PlaybackResponse: Decodable, Sendable {
             shuffle: shuffleState ?? false,
             repeatMode: repeatState ?? .off
         )
+    }
+}
+
+private struct PlaybackQueueResponse: Decodable, Sendable {
+    let currentlyPlaying: LossTolerant<SpotifyTrack>?
+    let queue: [LossTolerant<SpotifyTrack>]
+
+    enum CodingKeys: String, CodingKey {
+        case currentlyPlaying = "currently_playing"
+        case queue
     }
 }
 

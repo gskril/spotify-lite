@@ -17,6 +17,7 @@ protocol SpotifyAPIProviding: Sendable {
     func currentUserPlaylistsPage(after next: URL?) async throws -> Page<SpotifyPlaylistSummary>
     func playlistDetail(for playlist: SpotifyPlaylistSummary) async throws -> SpotifyPlaylistDetail
     func playbackState() async throws -> PlaybackState?
+    func playbackQueue() async throws -> PlaybackQueue
     func devices() async throws -> [SpotifyDevice]
     func transferPlayback(to deviceID: String, play: Bool) async throws
     func play(_ request: PlayRequest, on deviceID: String?) async throws

@@ -4,6 +4,7 @@ struct NowPlayingBar: View {
     @ObservedObject var environment: AppEnvironment
     @State private var showingPlayer = false
     @State private var showingDevices = false
+    @State private var showingQueue = false
     @State private var isSendingCommand = false
 
     var body: some View {
@@ -32,8 +33,11 @@ struct NowPlayingBar: View {
             Spacer()
             playbackControls
             Spacer()
-            deviceStatus
-                .frame(width: 180, alignment: .trailing)
+            HStack(spacing: 14) {
+                queueButton
+                deviceStatus
+            }
+            .frame(width: 220, alignment: .trailing)
         }
     }
 
@@ -43,6 +47,7 @@ struct NowPlayingBar: View {
                 .layoutPriority(1)
             Spacer(minLength: 4)
             playbackControls
+            queueButton
             devicePickerButton(compact: true)
         }
     }
@@ -79,6 +84,19 @@ struct NowPlayingBar: View {
                 .help("Next")
         }
         .buttonStyle(.plain)
+    }
+
+    private var queueButton: some View {
+        Button { showingQueue.toggle() } label: {
+            Image(systemName: "text.line.last.and.arrowtriangle.forward")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(showingQueue ? AppTheme.accent : .secondary)
+        .disabled(track == nil)
+        .help("Show queue")
+        .popover(isPresented: $showingQueue, arrowEdge: .bottom) {
+            QueueView(environment: environment)
+        }
     }
 
     @ViewBuilder private var deviceStatus: some View {
@@ -156,6 +174,126 @@ struct NowPlayingBar: View {
         environment.resumeLocally()
     }
 
+}
+
+private struct QueueView: View {
+    @ObservedObject var environment: AppEnvironment
+    @State private var queue: PlaybackQueue?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Queue").font(.headline)
+                    Text("What Spotify will play next")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { Task { await load(showLoading: false) } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .help("Refresh queue")
+            }
+            .padding(16)
+
+            Divider()
+
+            Group {
+                if isLoading, queue == nil {
+                    LoadingView(message: "Loading queue…")
+                } else if let errorMessage, queue == nil {
+                    FeatureStateView(
+                        title: "Queue unavailable",
+                        message: errorMessage,
+                        symbol: "text.line.last.and.arrowtriangle.forward",
+                        actionTitle: "Try Again"
+                    ) { Task { await load() } }
+                } else if let queue {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            if let current = queue.currentlyPlaying ?? environment.playback?.item {
+                                Text("NOW PLAYING")
+                                    .queueSectionLabel()
+                                queueRow(current, index: nil)
+                            }
+
+                            Text("NEXT UP")
+                                .queueSectionLabel()
+                                .padding(.top, 8)
+                            if queue.upcoming.isEmpty {
+                                Text("Nothing else is queued.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                            } else {
+                                ForEach(Array(queue.upcoming.enumerated()), id: \.offset) { index, track in
+                                    queueRow(track, index: index + 1)
+                                }
+                            }
+                        }
+                        .padding(10)
+                    }
+                }
+            }
+            .frame(minHeight: 180, maxHeight: 460)
+        }
+        .frame(width: 390)
+        .task { await load() }
+    }
+
+    private func queueRow(_ track: SpotifyTrack, index: Int?) -> some View {
+        HStack(spacing: 10) {
+            if let index {
+                Text("\(index)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, alignment: .trailing)
+            } else {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 20)
+            }
+            ArtworkView(url: track.album?.images.artworkURL(forPointSize: 40), size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.name).fontWeight(.medium).lineLimit(1)
+                Text(track.artists.map(\.name).joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+    }
+
+    private func load(showLoading: Bool = true) async {
+        if showLoading { isLoading = true }
+        errorMessage = nil
+        do {
+            queue = try await environment.api.playbackQueue()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+private extension View {
+    func queueSectionLabel() -> some View {
+        font(.caption2.bold())
+            .foregroundStyle(.secondary)
+            .tracking(0.6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+    }
 }
 
 private struct DevicePickerView: View {

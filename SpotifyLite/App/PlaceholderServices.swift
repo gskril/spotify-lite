@@ -24,6 +24,7 @@ actor PlaceholderAPI: SpotifyAPIProviding {
         SpotifyPlaylistDetail(summary: playlist, tracks: [], itemAccess: .restricted)
     }
     func playbackState() async throws -> PlaybackState? { nil }
+    func playbackQueue() async throws -> PlaybackQueue { .init(currentlyPlaying: nil, upcoming: []) }
     func devices() async throws -> [SpotifyDevice] { [] }
     func transferPlayback(to deviceID: String, play: Bool) async throws { throw PlaceholderError.notConfigured }
     func play(_ request: PlayRequest, on deviceID: String?) async throws { throw PlaceholderError.notConfigured }

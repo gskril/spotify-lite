@@ -26,6 +26,15 @@ struct RootView: View {
                 )
                 .zIndex(10)
             }
+
+            if let mix = environment.presentedGeneratedMix {
+                GeneratedMixModalLayer(
+                    environment: environment,
+                    mix: mix,
+                    onDismiss: environment.dismissGeneratedMix
+                )
+                .zIndex(10)
+            }
         }
         .tint(AppTheme.accent)
         .task { await bootstrapIfPossible() }

@@ -486,6 +486,7 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
         guard !playbackResponses.isEmpty else { return nil }
         return playbackResponses.removeFirst()
     }
+    func playbackQueue() async throws -> PlaybackQueue { .init(currentlyPlaying: nil, upcoming: []) }
 
     func playbackCallCount() -> Int {
         calls.count(where: { $0 == "playback" })

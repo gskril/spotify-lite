@@ -134,6 +134,11 @@ struct PlaybackState: Sendable, Equatable {
     var repeatMode: RepeatMode
 }
 
+struct PlaybackQueue: Sendable, Equatable {
+    let currentlyPlaying: SpotifyTrack?
+    let upcoming: [SpotifyTrack]
+}
+
 enum SearchType: String, Sendable, CaseIterable, Hashable {
     case album, artist, playlist, track
 }

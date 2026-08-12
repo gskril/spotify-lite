@@ -88,7 +88,14 @@ struct HomeView: View {
     }
 
     private var dayMixHero: some View {
-        Button { playTracks(dayMix) } label: {
+        Button {
+            environment.presentGeneratedMix(
+                title: dayMixTitle,
+                subtitle: dayMixSubtitle,
+                symbol: dayPartSymbol,
+                tracks: dayMix
+            )
+        } label: {
             HStack(spacing: 22) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 18)
@@ -117,7 +124,7 @@ struct HomeView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
-                    Label("Play \(dayMix.count) songs", systemImage: "play.fill")
+                    Label("View \(dayMix.count) songs", systemImage: "list.bullet")
                         .font(.headline)
                         .foregroundStyle(AppTheme.accent)
                 }
@@ -136,7 +143,7 @@ struct HomeView: View {
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(.quaternary))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Play \(dayMixTitle), \(dayMix.count) songs")
+        .accessibilityLabel("Open \(dayMixTitle), \(dayMix.count) songs")
     }
 
     private var playlistRail: some View {
