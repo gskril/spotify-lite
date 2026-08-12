@@ -104,6 +104,11 @@ final class AppEnvironment: ObservableObject {
     }
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) {
+        guard !isStartingPlayback else { return }
+        let previousPlayback = playback
+        if let preview {
+            playback = Self.previewPlayback(for: preview, preserving: previousPlayback)
+        }
         runStartingPlayback(preview: preview) { coordinator in
             try await coordinator.playLocally(request, preview: preview)
         }
@@ -152,16 +157,6 @@ final class AppEnvironment: ObservableObject {
         guard !isStartingPlayback else { return }
         let previousPlayback = playback
         isStartingPlayback = true
-        if let preview {
-            playback = PlaybackState(
-                item: preview,
-                progressMS: 0,
-                isPlaying: true,
-                device: previousPlayback?.device,
-                shuffle: previousPlayback?.shuffle ?? false,
-                repeatMode: previousPlayback?.repeatMode ?? .off
-            )
-        }
         Task {
             defer { isStartingPlayback = false }
             do {
@@ -174,5 +169,19 @@ final class AppEnvironment: ObservableObject {
                 report(error)
             }
         }
+    }
+
+    static func previewPlayback(
+        for track: SpotifyTrack,
+        preserving previousPlayback: PlaybackState?
+    ) -> PlaybackState {
+        PlaybackState(
+            item: track,
+            progressMS: 0,
+            isPlaying: true,
+            device: previousPlayback?.device,
+            shuffle: previousPlayback?.shuffle ?? false,
+            repeatMode: previousPlayback?.repeatMode ?? .off
+        )
     }
 }

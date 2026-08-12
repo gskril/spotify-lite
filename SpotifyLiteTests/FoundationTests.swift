@@ -80,4 +80,44 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(info?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double, 15)
         XCTAssertEqual(info?[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 1)
     }
+
+    @MainActor
+    func testSelectedTrackPreviewIsImmediatelyReadyForTheBottomPlayer() {
+        let previousDevice = SpotifyDevice(
+            id: "device",
+            isActive: true,
+            isPrivateSession: false,
+            isRestricted: false,
+            name: "This Mac",
+            type: "computer",
+            volumePercent: 42,
+            supportsVolume: true
+        )
+        let previous = PlaybackState(
+            item: nil,
+            progressMS: 90_000,
+            isPlaying: false,
+            device: previousDevice,
+            shuffle: true,
+            repeatMode: .context
+        )
+        let selected = SpotifyTrack(
+            id: "selected",
+            name: "Selected",
+            uri: "spotify:track:selected",
+            durationMS: 180_000,
+            explicit: false,
+            artists: [],
+            album: nil
+        )
+
+        let preview = AppEnvironment.previewPlayback(for: selected, preserving: previous)
+
+        XCTAssertEqual(preview.item, selected)
+        XCTAssertEqual(preview.progressMS, 0)
+        XCTAssertTrue(preview.isPlaying)
+        XCTAssertEqual(preview.device, previousDevice)
+        XCTAssertTrue(preview.shuffle)
+        XCTAssertEqual(preview.repeatMode, .context)
+    }
 }

@@ -240,14 +240,15 @@ actor PlaybackCoordinator {
     }
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) async throws {
-        try await serialized {
-            let previousPendingTrackURI = self.pendingSelectedTrackURI
-            let previousPendingTrackDeadline = self.pendingSelectedTrackDeadline
-            self.pendingSelectedTrackURI = preview?.uri
-            self.pendingSelectedTrackDeadline = preview == nil
-                ? nil
-                : self.clock.now.advanced(by: .seconds(12))
-            do {
+        let originalPlayback = serverPlayback
+        let originalPlaybackTimestamp = serverPlaybackTimestamp
+        let previousPendingTrackURI = pendingSelectedTrackURI
+        let previousPendingTrackDeadline = pendingSelectedTrackDeadline
+        if let preview {
+            installPendingPreview(preview)
+        }
+        do {
+            try await serialized {
                 try await self.optimistically(updating: { playback in
                     if let preview {
                         playback = PlaybackState(
@@ -273,18 +274,36 @@ actor PlaybackCoordinator {
                     self.eventBus.send(.stateChanged(self.serverPlayback))
                     try await self.api.play(request, on: deviceID)
                 }
-            } catch {
-                self.pendingSelectedTrackURI = previousPendingTrackURI
-                self.pendingSelectedTrackDeadline = previousPendingTrackDeadline
-                throw error
+                // The Web API playback state is eventually consistent after starting a new item.
+                // Keep a known clicked track visible until the regular reconciliation poll confirms it,
+                // rather than immediately replacing it with the previous server response.
+                if preview == nil {
+                    try await self.refreshAfterCommandIfNeeded()
+                }
             }
-            // The Web API playback state is eventually consistent after starting a new item.
-            // Keep a known clicked track visible until the regular reconciliation poll confirms it,
-            // rather than immediately replacing it with the previous server response.
-            if preview == nil {
-                try await self.refreshAfterCommandIfNeeded()
-            }
+        } catch {
+            pendingSelectedTrackURI = previousPendingTrackURI
+            pendingSelectedTrackDeadline = previousPendingTrackDeadline
+            serverPlayback = originalPlayback
+            serverPlaybackTimestamp = originalPlaybackTimestamp
+            eventBus.send(.stateChanged(originalPlayback))
+            throw error
         }
+    }
+
+    private func installPendingPreview(_ preview: SpotifyTrack) {
+        pendingSelectedTrackURI = preview.uri
+        pendingSelectedTrackDeadline = clock.now.advanced(by: .seconds(12))
+        serverPlayback = PlaybackState(
+            item: preview,
+            progressMS: 0,
+            isPlaying: true,
+            device: serverPlayback?.device,
+            shuffle: serverPlayback?.shuffle ?? false,
+            repeatMode: serverPlayback?.repeatMode ?? .off
+        )
+        serverPlaybackTimestamp = clock.now
+        eventBus.send(.stateChanged(serverPlayback))
     }
 
     func resume() async throws {
