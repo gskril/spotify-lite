@@ -50,7 +50,7 @@ struct NowPlayingBar: View {
     private func trackSummary(width: CGFloat?) -> some View {
         Button { showingPlayer = true } label: {
             HStack(spacing: 11) {
-                ArtworkView(url: track?.album?.images.first?.url, size: 48)
+                ArtworkView(url: track?.album?.images.artworkURL(forPointSize: 48), size: 48)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track?.name ?? "Nothing playing")
                         .fontWeight(.semibold).lineLimit(1)
@@ -349,7 +349,7 @@ struct ExpandedPlayerView: View {
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
-            ArtworkView(url: track?.album?.images.first?.url, size: 270, cornerRadius: 16)
+            ArtworkView(url: track?.album?.images.artworkURL(forPointSize: 270), size: 270, cornerRadius: 16)
                 .shadow(color: .black.opacity(0.25), radius: 20, y: 10)
             VStack(spacing: 5) {
                 Text(track?.name ?? "Nothing playing").font(.title2.bold()).lineLimit(1)

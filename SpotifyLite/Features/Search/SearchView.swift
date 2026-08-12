@@ -103,7 +103,7 @@ struct SearchView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 16) {
                 ForEach(results.albums) { album in
-                    resultTile(title: album.name, subtitle: album.artists.map(\.name).joined(separator: ", "), url: album.images.first?.url, symbol: "square.stack") {
+                    resultTile(title: album.name, subtitle: album.artists.map(\.name).joined(separator: ", "), url: album.images.artworkURL(forPointSize: 132), symbol: "square.stack") {
                         playContext(album.uri)
                     }
                 }

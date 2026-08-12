@@ -19,6 +19,27 @@ struct SpotifyImage: Codable, Sendable, Equatable, Identifiable {
     var id: URL { url }
 }
 
+extension Collection where Element == SpotifyImage {
+    /// Selects the smallest Spotify-provided image that still fills the rendered artwork.
+    /// Falling back to the largest image preserves quality when dimensions are unavailable.
+    func artworkURL(forPointSize pointSize: CGFloat, displayScale: CGFloat = 2) -> URL? {
+        // Spotify commonly jumps from 300 px to 640 px. A tiny undersize tolerance avoids
+        // downloading and retaining more than 4x the pixels for 148–154 pt Retina tiles.
+        let requiredPixels = Int(ceil(pointSize * displayScale * 0.95))
+        let sizedImages = compactMap { image -> (image: SpotifyImage, edge: Int)? in
+            guard let width = image.width, let height = image.height else { return nil }
+            return (image, Swift.min(width, height))
+        }
+
+        if let match = sizedImages
+            .filter({ $0.edge >= requiredPixels })
+            .min(by: { $0.edge < $1.edge }) {
+            return match.image.url
+        }
+        return sizedImages.max(by: { $0.edge < $1.edge })?.image.url ?? first?.url
+    }
+}
+
 struct SpotifyArtist: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String

@@ -35,7 +35,7 @@ struct TrackRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ArtworkView(url: track.album?.images.first?.url, size: 46)
+            ArtworkView(url: track.album?.images.artworkURL(forPointSize: 46), size: 46)
             VStack(alignment: .leading, spacing: 3) {
                 Text(track.name)
                     .fontWeight(.medium)
@@ -75,4 +75,3 @@ extension Int {
         return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
     }
 }
-

@@ -161,7 +161,7 @@ struct HomeView: View {
                     mediaTile(
                         title: album.name,
                         subtitle: album.artists.map(\.name).joined(separator: ", "),
-                        artwork: album.images.first?.url,
+                        artwork: album.images.artworkURL(forPointSize: 154),
                         symbol: "square.stack"
                     ) { playContext(album.uri) }
                 }
@@ -176,7 +176,7 @@ struct HomeView: View {
                     mediaTile(
                         title: track.name,
                         subtitle: track.artists.map(\.name).joined(separator: ", "),
-                        artwork: track.album?.images.first?.url,
+                        artwork: track.album?.images.artworkURL(forPointSize: 154),
                         symbol: "music.note"
                     ) { playTracks([track]) }
                 }

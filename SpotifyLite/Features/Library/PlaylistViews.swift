@@ -11,7 +11,7 @@ struct PlaylistCard: View {
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: 8) {
                     ArtworkView(
-                        url: playlist.images.first?.url,
+                        url: playlist.images.artworkURL(forPointSize: artworkSize),
                         size: artworkSize,
                         cornerRadius: 10,
                         symbol: "music.note.list"
@@ -61,7 +61,7 @@ struct PlaylistDetailView: View {
             ZStack(alignment: .topTrailing) {
                 HStack(alignment: .center, spacing: 20) {
                     ArtworkView(
-                        url: displayedPlaylist.images.first?.url,
+                        url: displayedPlaylist.images.artworkURL(forPointSize: 152),
                         size: 132,
                         cornerRadius: 10,
                         symbol: "music.note.list"
