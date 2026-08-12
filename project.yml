@@ -18,11 +18,14 @@ targets:
     sources:
       - path: SpotifyLite
         type: syncedFolder
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.spotifylite.SpotifyLite
         PRODUCT_NAME: SpotifyLite
         PRODUCT_MODULE_NAME: SpotifyLite
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Spotify Lite
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music

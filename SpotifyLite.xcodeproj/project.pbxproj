@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		79387FBEB42DB262775F52C1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C5BE5CDBEA8DD1E08512EE9C /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		96360908EA115F97C65B6338 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -19,6 +23,7 @@
 /* Begin PBXFileReference section */
 		34BD6C935D9227410ECED9CA /* SpotifyLiteTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpotifyLiteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		83CC99D29A17DD5EBBADA7FC /* SpotifyLite.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpotifyLite.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C5BE5CDBEA8DD1E08512EE9C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -48,6 +53,7 @@
 			children = (
 				930AACFCA9ECDEADD53C8800 /* SpotifyLite */,
 				6B44C0C9BAE85582E8F8E2E3 /* SpotifyLiteTests */,
+				B626536F9DD22A9DF8261CA0 /* Resources */,
 				68EAEF4DA9206141B9F6D8C6 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -59,6 +65,14 @@
 				34BD6C935D9227410ECED9CA /* SpotifyLiteTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B626536F9DD22A9DF8261CA0 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C5BE5CDBEA8DD1E08512EE9C /* Assets.xcassets */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -90,6 +104,7 @@
 			buildConfigurationList = 9E51080189F9C869D5919960 /* Build configuration list for PBXNativeTarget "SpotifyLite" */;
 			buildPhases = (
 				7921E90D8A94502173AD11EA /* Sources */,
+				2EEA246B6B1C5D91E89F6D2D /* Resources */,
 			);
 			buildRules = (
 			);
@@ -141,6 +156,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2EEA246B6B1C5D91E89F6D2D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				79387FBEB42DB262775F52C1 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		7921E90D8A94502173AD11EA /* Sources */ = {
