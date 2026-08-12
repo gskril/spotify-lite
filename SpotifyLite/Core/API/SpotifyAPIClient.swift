@@ -62,6 +62,19 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         )
     }
 
+    func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> {
+        try await collectPage(
+            first: Endpoint(
+                method: "GET",
+                path: "me/tracks",
+                query: [URLQueryItem(name: "limit", value: "50")]
+            ),
+            after: next,
+            as: LossTolerant<SavedTrackItem>.self,
+            transform: { $0.value?.track }
+        )
+    }
+
     func savedAlbums() async throws -> [SpotifyAlbumSummary] {
         try await collect(
             first: Endpoint(
@@ -74,6 +87,19 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         )
     }
 
+    func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary> {
+        try await collectPage(
+            first: Endpoint(
+                method: "GET",
+                path: "me/albums",
+                query: [URLQueryItem(name: "limit", value: "50")]
+            ),
+            after: next,
+            as: LossTolerant<SavedAlbumItem>.self,
+            transform: { $0.value?.album }
+        )
+    }
+
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary] {
         try await collect(
             first: Endpoint(
@@ -81,6 +107,19 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
                 path: "me/playlists",
                 query: [URLQueryItem(name: "limit", value: "50")]
             ),
+            as: LossTolerant<SpotifyPlaylistSummary>.self,
+            transform: { $0.value }
+        )
+    }
+
+    func currentUserPlaylistsPage(after next: URL?) async throws -> Page<SpotifyPlaylistSummary> {
+        try await collectPage(
+            first: Endpoint(
+                method: "GET",
+                path: "me/playlists",
+                query: [URLQueryItem(name: "limit", value: "50")]
+            ),
+            after: next,
             as: LossTolerant<SpotifyPlaylistSummary>.self,
             transform: { $0.value }
         )
@@ -314,6 +353,20 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
             }
         }
         return output
+    }
+
+    private func collectPage<Item: Decodable & Sendable, Output: Sendable>(
+        first: Endpoint,
+        after next: URL?,
+        as itemType: Item.Type,
+        transform: @Sendable (Item) -> Output?
+    ) async throws -> Page<Output> {
+        let endpoint = next.map { Endpoint(method: "GET", absoluteURL: $0) } ?? first
+        let page = try await decode(SpotifyPage<Item>.self, from: endpoint)
+        return Page(
+            items: page.items.compactMap(transform),
+            next: page.next.flatMap(URL.init(string:))
+        )
     }
 
     private func requestData(_ endpoint: Endpoint) async throws -> Data {

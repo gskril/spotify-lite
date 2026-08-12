@@ -140,6 +140,30 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.last?.url?.query, "offset=2")
     }
 
+    func testSavedTracksPageReturnsImmediatelyWithoutFollowingNext() async throws {
+        let pageOne = #"{"items":[{"track":{"id":"one","name":"One","uri":"spotify:track:one","duration_ms":100,"explicit":false,"artists":[]}}],"next":"https://unit.test/v1/me/tracks?offset=50"}"#
+        let pageTwo = #"{"items":[{"track":{"id":"two","name":"Two","uri":"spotify:track:two","duration_ms":200,"explicit":false,"artists":[]}}],"next":null}"#
+        let recorder = APIRequestRecorder(responses: [
+            .init(status: 200, body: pageOne),
+            .init(status: 200, body: pageTwo)
+        ])
+        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
+        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
+
+        let first = try await api.savedTracksPage(after: nil)
+
+        XCTAssertEqual(first.items.map(\.id), ["one"])
+        XCTAssertEqual(first.next?.query, "offset=50")
+        XCTAssertEqual(recorder.requests.count, 1)
+
+        let second = try await api.savedTracksPage(after: first.next)
+
+        XCTAssertEqual(second.items.map(\.id), ["two"])
+        XCTAssertNil(second.next)
+        XCTAssertEqual(recorder.requests.count, 2)
+        XCTAssertEqual(recorder.requests.last?.url?.query, "offset=50")
+    }
+
     func testLibraryMutationUsesNewUnifiedEndpointAndSpotifyURI() async throws {
         let recorder = APIRequestRecorder(responses: [.init(status: 200, body: "")])
         APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
