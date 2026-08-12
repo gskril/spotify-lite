@@ -10,4 +10,12 @@ xcodebuild \
   -destination 'platform=macOS' \
   -derivedDataPath .build/DerivedData \
   CODE_SIGNING_ALLOWED=NO \
-  build test
+  test
+xcodebuild \
+  -project SpotifyLite.xcodeproj \
+  -scheme SpotifyLite \
+  -configuration Release \
+  -destination 'platform=macOS' \
+  -derivedDataPath .build/DerivedData \
+  CODE_SIGNING_ALLOWED=NO \
+  build
