@@ -58,6 +58,125 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, ["playback"])
     }
 
+    func testStartupPrefersLocallyRememberedTrackOverLaggingAccountHistory() async throws {
+        let local = makeTrack(id: "local", name: "Played before quitting")
+        let staleHistory = makeTrack(id: "stale", name: "Older account history")
+        let api = PlaybackAPISpy(
+            deviceResponses: [],
+            playbackResponses: [nil],
+            recentlyPlayedTracks: [staleHistory]
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: SpotifydManagerSpy(),
+            receiverName: "Spotify Lite — Test Mac"
+        )
+        let remembered = PlaybackState(
+            item: local,
+            progressMS: 42_000,
+            isPlaying: true,
+            device: makeDevice(id: "old-device", active: true),
+            shuffle: true,
+            repeatMode: .context
+        )
+
+        let hydrated = try await coordinator.hydrateFromAccountHistory(
+            rememberedPlayback: remembered
+        )
+
+        XCTAssertEqual(hydrated?.item, local)
+        XCTAssertEqual(hydrated?.progressMS, 0)
+        XCTAssertEqual(hydrated?.isPlaying, false)
+        XCTAssertNil(hydrated?.device)
+        XCTAssertEqual(hydrated?.shuffle, true)
+        XCTAssertEqual(hydrated?.repeatMode, .context)
+        let calls = await api.calls
+        XCTAssertEqual(calls, ["playback"])
+    }
+
+    func testPlayStartsRememberedHistoryTrackOnLocalReceiver() async throws {
+        let recent = makeTrack(
+            id: "recent",
+            name: "Last played",
+            albumURI: "spotify:album:recent-album"
+        )
+        let receiver = makeDevice(id: "local-v1", active: false)
+        let api = PlaybackAPISpy(
+            deviceResponses: [[receiver]],
+            playbackResponses: [nil],
+            recentlyPlayedTracks: [recent]
+        )
+        let daemon = SpotifydManagerSpy()
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: daemon,
+            receiverName: receiver.name,
+            configuration: .init(
+                receiverDiscoveryTimeout: .seconds(1),
+                initialDiscoveryDelay: .milliseconds(1),
+                maximumDiscoveryDelay: .milliseconds(5),
+                refreshAfterCommands: false
+            )
+        )
+
+        _ = try await coordinator.hydrateFromAccountHistory()
+        try await coordinator.play()
+
+        let daemonCalls = await daemon.calls
+        let apiCalls = await api.calls
+        let playback = await coordinator.currentPlayback()
+        XCTAssertEqual(daemonCalls, ["start"])
+        XCTAssertEqual(apiCalls, [
+            "playback",
+            "recently-played",
+            "devices",
+            "play:local-v1:context(spotify:album:recent-album)"
+        ])
+        XCTAssertEqual(playback?.item, recent)
+        XCTAssertEqual(playback?.device, receiver)
+        XCTAssertEqual(playback?.isPlaying, true)
+    }
+
+    func testPlayResumesExistingStartupSessionOnItsDevice() async throws {
+        let current = makeTrack(id: "current", name: "Current song")
+        let device = makeDevice(id: "remote-v1", active: true)
+        let state = PlaybackState(
+            item: current,
+            progressMS: 12_000,
+            isPlaying: false,
+            device: device,
+            shuffle: false,
+            repeatMode: .off
+        )
+        let api = PlaybackAPISpy(
+            deviceResponses: [[device]],
+            playbackResponses: [state]
+        )
+        let daemon = SpotifydManagerSpy()
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: daemon,
+            receiverName: "Spotify Lite — Test Mac",
+            configuration: .init(refreshAfterCommands: false)
+        )
+
+        _ = try await coordinator.hydrateFromAccountHistory()
+        try await coordinator.play()
+
+        let daemonCalls = await daemon.calls
+        let apiCalls = await api.calls
+        let playback = await coordinator.currentPlayback()
+        XCTAssertEqual(daemonCalls, [])
+        XCTAssertEqual(apiCalls, [
+            "playback",
+            "devices",
+            "play:remote-v1:resume"
+        ])
+        XCTAssertEqual(playback?.item, current)
+        XCTAssertEqual(playback?.device, device)
+        XCTAssertEqual(playback?.isPlaying, true)
+    }
+
     func testLocalPlayUsesExplicitDeviceWithoutTransfer() async throws {
         let inactive = makeDevice(id: "local-v1", active: false)
         let api = PlaybackAPISpy(deviceResponses: [[inactive]])
@@ -463,7 +582,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
     }
 
-    private func makeTrack(id: String, name: String) -> SpotifyTrack {
+    private func makeTrack(id: String, name: String, albumURI: String? = nil) -> SpotifyTrack {
         SpotifyTrack(
             id: id,
             name: name,
@@ -471,7 +590,16 @@ final class PlaybackCoordinatorTests: XCTestCase {
             durationMS: 180_000,
             explicit: false,
             artists: [SpotifyArtist(id: "artist", name: "Artist", uri: nil, images: nil)],
-            album: nil
+            album: albumURI.map { uri in
+                SpotifyAlbumSummary(
+                    id: "album",
+                    name: "Album",
+                    uri: uri,
+                    artists: [],
+                    images: [],
+                    releaseDate: nil
+                )
+            }
         )
     }
 

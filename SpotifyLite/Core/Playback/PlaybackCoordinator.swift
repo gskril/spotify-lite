@@ -142,10 +142,12 @@ actor PlaybackCoordinator {
     }
 
     /// Hydrates the player when an authenticated session becomes ready. Spotify returns no
-    /// playback object when every device is idle, so fall back to the newest history item and
-    /// present it as paused—the same useful "last played" state users expect from a player.
+    /// playback object when every device is idle, so prefer the app's last known track before
+    /// consulting account history, which Spotify may update after a delay.
     @discardableResult
-    func hydrateFromAccountHistory() async throws -> PlaybackState? {
+    func hydrateFromAccountHistory(
+        rememberedPlayback: PlaybackState? = nil
+    ) async throws -> PlaybackState? {
         if let state = try await api.playbackState() {
             setPlayback(state)
             if let device = state.device, device.name == receiverName {
@@ -155,6 +157,13 @@ actor PlaybackCoordinator {
         }
 
         if serverPlayback?.item != nil { return currentPlayback() }
+        if var remembered = rememberedPlayback, remembered.item != nil {
+            remembered.progressMS = 0
+            remembered.isPlaying = false
+            remembered.device = nil
+            setPlayback(remembered)
+            return remembered
+        }
         guard let track = try await api.mostRecentlyPlayed() else { return nil }
         let remembered = PlaybackState(
             item: track,
@@ -273,6 +282,7 @@ actor PlaybackCoordinator {
     }
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) async throws {
+        let playbackRequest = Self.contextualized(request, preview: preview)
         let originalPlayback = serverPlayback
         let originalPlaybackTimestamp = serverPlaybackTimestamp
         let previousPendingTrackURI = pendingSelectedTrackURI
@@ -305,7 +315,7 @@ actor PlaybackCoordinator {
                     self.serverPlayback?.device = device
                     self.serverPlaybackTimestamp = self.clock.now
                     self.eventBus.send(.stateChanged(self.serverPlayback))
-                    try await self.api.play(request, on: deviceID)
+                    try await self.api.play(playbackRequest, on: deviceID)
                 }
                 // The Web API playback state is eventually consistent after starting a new item.
                 // Keep a known clicked track visible until the regular reconciliation poll confirms it,
@@ -339,6 +349,22 @@ actor PlaybackCoordinator {
         eventBus.send(.stateChanged(serverPlayback))
     }
 
+    private static func contextualized(
+        _ request: PlayRequest,
+        preview: SpotifyTrack?
+    ) -> PlayRequest {
+        guard case .uris(let uris, _) = request,
+              uris.count == 1,
+              let preview,
+              uris[0] == preview.uri,
+              let albumURI = preview.album?.uri else {
+            return request
+        }
+        // spotifyd needs a real context to establish its queue. A one-item URI list can
+        // be acknowledged by the Web API but then rejected by the receiver.
+        return .context(uri: albumURI, offsetURI: preview.uri)
+    }
+
     func resume() async throws {
         try await serialized {
             try await self.spotifyd.start()
@@ -365,6 +391,13 @@ actor PlaybackCoordinator {
     }
 
     func play() async throws {
+        // A track without a device has no Spotify session to resume (normally this is the
+        // startup history fallback). Start that exact track on the local receiver so the
+        // first Play action matches what the player is showing.
+        if let track = serverPlayback?.item, serverPlayback?.device == nil {
+            try await playLocally(.uris([track.uri]), preview: track)
+            return
+        }
         try await withReceiverCommand(optimistic: { $0?.isPlaying = true }, refreshAfter: false) { deviceID in
             try await self.api.play(.resume, on: deviceID)
         }

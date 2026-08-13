@@ -16,7 +16,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 - Native macOS media-key and Now Playing integration.
 - Immediate optimistic player updates after selecting a track.
 - Five-second playback reconciliation only while the app is active; progress is interpolated locally and polling stops while the app is hidden or backgrounded.
-- Startup restores Spotify's current session, or shows the account's most recently played track as paused when no device has an active session.
+- Startup restores Spotify's current session, or shows Spotify Lite's last known track as paused when no device has an active session. Account history is used only when the app has not remembered a track yet.
 - Supervision of one app-owned `spotifyd` child process with private configuration, bounded redacted logs, and graceful shutdown.
 
 The app is source-built and unsigned. It is not currently packaged, notarized, or distributed as a finished consumer application.
@@ -97,7 +97,7 @@ Navigation and playback actions are also available in the app's native menus. Th
 ## Privacy and storage
 
 - Spotify Web API access and refresh tokens are stored in Keychain.
-- The public client ID and non-secret preferences are stored in `UserDefaults`.
+- The public client ID, last displayed track, and non-secret preferences are stored in `UserDefaults`.
 - Generated configuration, `spotifyd` credentials/cache, and bounded logs live under `~/Library/Application Support/SpotifyLite/`.
 - The receiver cache is bounded to 1 GB by the generated configuration; each retained log file is bounded to approximately 512 KB.
 - OAuth codes, tokens, PKCE values, callback parameters, and `spotifyd` credentials must never be committed or written to diagnostics.

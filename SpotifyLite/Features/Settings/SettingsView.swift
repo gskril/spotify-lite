@@ -211,7 +211,10 @@ struct SettingsView: View {
     private func signOut() {
         Task {
             try? await environment.authorizer.signOut()
-            await MainActor.run { environment.sessionState = .needsSetup }
+            await MainActor.run {
+                environment.clearRememberedPlayback()
+                environment.sessionState = .needsSetup
+            }
         }
     }
 
