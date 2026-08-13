@@ -50,6 +50,18 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         )
     }
 
+    func mostRecentlyPlayed() async throws -> SpotifyTrack? {
+        let page = try await decode(
+            SpotifyPage<LossTolerant<RecentlyPlayedItem>>.self,
+            from: Endpoint(
+                method: "GET",
+                path: "me/player/recently-played",
+                query: [URLQueryItem(name: "limit", value: "1")]
+            )
+        )
+        return page.items.first?.value?.track
+    }
+
     func savedTracks() async throws -> [SpotifyTrack] {
         try await collect(
             first: Endpoint(

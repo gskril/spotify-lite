@@ -44,13 +44,31 @@ struct RootView: View {
         .task { environment.installSystemMediaCommands() }
         .onChange(of: scenePhase, initial: true) { _, phase in
             Task {
+                guard case .ready = environment.sessionState else {
+                    await environment.playbackCoordinator.setObservationActivity(.hidden)
+                    return
+                }
                 await environment.playbackCoordinator.setObservationActivity(
                     phase == .active ? .active : .hidden
                 )
             }
         }
         .onChange(of: environment.sessionState) { _, state in
-            guard autoStartReceiver, case .ready = state else { return }
+            guard case .ready = state else {
+                Task { await environment.playbackCoordinator.setObservationActivity(.hidden) }
+                return
+            }
+            Task {
+                do {
+                    environment.playback = try await environment.playbackCoordinator.hydrateFromAccountHistory()
+                } catch {
+                    // Playback history is helpful startup state, not a reason to block the app.
+                }
+                await environment.playbackCoordinator.setObservationActivity(
+                    scenePhase == .active ? .active : .hidden
+                )
+            }
+            guard autoStartReceiver else { return }
             Task {
                 do { try await environment.spotifyd.start() }
                 catch SpotifydSupervisorError.authenticationRequired {

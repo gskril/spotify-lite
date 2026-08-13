@@ -141,6 +141,33 @@ actor PlaybackCoordinator {
         return playback
     }
 
+    /// Hydrates the player when an authenticated session becomes ready. Spotify returns no
+    /// playback object when every device is idle, so fall back to the newest history item and
+    /// present it as paused—the same useful "last played" state users expect from a player.
+    @discardableResult
+    func hydrateFromAccountHistory() async throws -> PlaybackState? {
+        if let state = try await api.playbackState() {
+            setPlayback(state)
+            if let device = state.device, device.name == receiverName {
+                updateReceiver(device)
+            }
+            return state
+        }
+
+        if serverPlayback?.item != nil { return currentPlayback() }
+        guard let track = try await api.mostRecentlyPlayed() else { return nil }
+        let remembered = PlaybackState(
+            item: track,
+            progressMS: 0,
+            isPlaying: false,
+            device: nil,
+            shuffle: false,
+            repeatMode: .off
+        )
+        setPlayback(remembered)
+        return remembered
+    }
+
     @discardableResult
     func refresh() async throws -> PlaybackState? {
         let state = try await api.playbackState()
@@ -154,6 +181,12 @@ actor PlaybackCoordinator {
                 self.pendingSelectedTrackURI = nil
                 pendingSelectedTrackDeadline = nil
             }
+        }
+        if state == nil, var remembered = serverPlayback, remembered.item != nil {
+            remembered.isPlaying = false
+            remembered.device = nil
+            setPlayback(remembered)
+            return remembered
         }
         setPlayback(state)
         if let device = state?.device, device.name == receiverName {

@@ -9,6 +9,7 @@ protocol SpotifyAuthorizing: Sendable {
 protocol SpotifyAPIProviding: Sendable {
     func currentUser() async throws -> SpotifyUser
     func recentlyPlayed() async throws -> [SpotifyTrack]
+    func mostRecentlyPlayed() async throws -> SpotifyTrack?
     func savedTracks() async throws -> [SpotifyTrack]
     func savedAlbums() async throws -> [SpotifyAlbumSummary]
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary]
@@ -34,6 +35,10 @@ protocol SpotifyAPIProviding: Sendable {
 }
 
 extension SpotifyAPIProviding {
+    func mostRecentlyPlayed() async throws -> SpotifyTrack? {
+        try await recentlyPlayed().first
+    }
+
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> {
         guard next == nil else { return Page(items: [], next: nil) }
         return Page(items: try await savedTracks(), next: nil)

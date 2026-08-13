@@ -16,6 +16,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 - Native macOS media-key and Now Playing integration.
 - Immediate optimistic player updates after selecting a track.
 - Five-second playback reconciliation only while the app is active; progress is interpolated locally and polling stops while the app is hidden or backgrounded.
+- Startup restores Spotify's current session, or shows the account's most recently played track as paused when no device has an active session.
 - Supervision of one app-owned `spotifyd` child process with private configuration, bounded redacted logs, and graceful shutdown.
 
 The app is source-built and unsigned. It is not currently packaged, notarized, or distributed as a finished consumer application.

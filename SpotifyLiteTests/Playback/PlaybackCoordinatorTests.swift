@@ -3,6 +3,61 @@ import XCTest
 @testable import SpotifyLite
 
 final class PlaybackCoordinatorTests: XCTestCase {
+    func testStartupHydratesPausedPlayerFromMostRecentTrackWhenAccountIsIdle() async throws {
+        let recent = makeTrack(id: "recent", name: "Last played")
+        let api = PlaybackAPISpy(
+            deviceResponses: [],
+            playbackResponses: [nil],
+            recentlyPlayedTracks: [recent]
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: SpotifydManagerSpy(),
+            receiverName: "Spotify Lite — Test Mac"
+        )
+
+        let hydrated = try await coordinator.hydrateFromAccountHistory()
+        _ = try await coordinator.refresh()
+        let afterEmptyRefresh = await coordinator.currentPlayback()
+
+        XCTAssertEqual(hydrated?.item, recent)
+        XCTAssertEqual(hydrated?.isPlaying, false)
+        XCTAssertEqual(hydrated?.progressMS, 0)
+        XCTAssertNil(hydrated?.device)
+        XCTAssertEqual(afterEmptyRefresh?.item, recent)
+        XCTAssertEqual(afterEmptyRefresh?.isPlaying, false)
+        let calls = await api.calls
+        XCTAssertEqual(calls, ["playback", "recently-played", "playback"])
+    }
+
+    func testStartupUsesCurrentPlaybackWithoutLoadingHistory() async throws {
+        let current = makeTrack(id: "current", name: "Current song")
+        let state = PlaybackState(
+            item: current,
+            progressMS: 12_000,
+            isPlaying: false,
+            device: nil,
+            shuffle: true,
+            repeatMode: .context
+        )
+        let api = PlaybackAPISpy(
+            deviceResponses: [],
+            playbackResponses: [state],
+            recentlyPlayedTracks: [makeTrack(id: "older", name: "Older song")]
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: SpotifydManagerSpy(),
+            receiverName: "Spotify Lite — Test Mac"
+        )
+
+        let hydrated = try await coordinator.hydrateFromAccountHistory()
+
+        XCTAssertEqual(hydrated, state)
+        let calls = await api.calls
+        XCTAssertEqual(calls, ["playback"])
+    }
+
     func testLocalPlayUsesExplicitDeviceWithoutTransfer() async throws {
         let inactive = makeDevice(id: "local-v1", active: false)
         let api = PlaybackAPISpy(deviceResponses: [[inactive]])
@@ -462,6 +517,7 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     private var deviceResponses: [[SpotifyDevice]]
     private var playbackResponses: [PlaybackState?]
     private let operationDelay: Duration
+    private let recentlyPlayedTracks: [SpotifyTrack]
     private(set) var calls: [String] = []
     private(set) var activeOperations = 0
     private(set) var maximumConcurrentOperations = 0
@@ -469,15 +525,20 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     init(
         deviceResponses: [[SpotifyDevice]],
         playbackResponses: [PlaybackState?] = [],
+        recentlyPlayedTracks: [SpotifyTrack] = [],
         operationDelay: Duration = .zero
     ) {
         self.deviceResponses = deviceResponses
         self.playbackResponses = playbackResponses
+        self.recentlyPlayedTracks = recentlyPlayedTracks
         self.operationDelay = operationDelay
     }
 
     func currentUser() async throws -> SpotifyUser { throw PlaceholderError.notConfigured }
-    func recentlyPlayed() async throws -> [SpotifyTrack] { [] }
+    func recentlyPlayed() async throws -> [SpotifyTrack] {
+        calls.append("recently-played")
+        return recentlyPlayedTracks
+    }
     func savedTracks() async throws -> [SpotifyTrack] { [] }
     func savedAlbums() async throws -> [SpotifyAlbumSummary] { [] }
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary] { [] }

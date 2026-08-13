@@ -61,6 +61,7 @@ user-read-recently-played
 - [x] Serialize commands and support play, pause, previous, next, seek, shuffle, repeat, volume, queue append at the service layer, and device transfer.
 - [x] Optimistically update clicked tracks and locally interpolate progress.
 - [x] Reconcile playback every five seconds only while the app is active; refresh after commands and when the app becomes active; stop reconciliation while hidden/backgrounded.
+- [x] Hydrate Now Playing at authenticated startup from the current account session, falling back to one most-recently-played item when Spotify reports no active session.
 - [x] Publish native Now Playing metadata and handle play/pause, previous, and next media-key commands.
 
 ### User interface
