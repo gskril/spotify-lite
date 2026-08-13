@@ -21,6 +21,12 @@ final class HomePersonalizerTests: XCTestCase {
             playlist("daylist", name: "Tuesday afternoon daylist", ownerID: "spotify"),
             playlist("daily", name: "Daily Mix 2", ownerID: "spotify"),
             playlist("discover", name: "Discover Weekly", ownerID: "spotify"),
+            playlist(
+                "daylist-description",
+                name: "new wave 80s alternative wednesday night",
+                ownerID: "spotify",
+                description: "Your daylist changes throughout the day"
+            ),
             playlist("copy", name: "Discover Weekly Saved 12", ownerID: "listener"),
             playlist("chill", name: "Chill Mix", ownerID: "spotify"),
             playlist("cooking", name: "Cooking", ownerID: "listener")
@@ -29,7 +35,7 @@ final class HomePersonalizerTests: XCTestCase {
         let madeForYou = HomePersonalizer.spotifyGeneratedPlaylists(playlists, limit: 12)
         let jumpBackIn = HomePersonalizer.jumpBackInPlaylists(playlists, limit: 12)
 
-        XCTAssertEqual(madeForYou.map(\.id), ["daylist", "daily", "discover", "chill"])
+        XCTAssertEqual(madeForYou.map(\.id), ["daylist", "daily", "discover", "daylist-description", "chill"])
         XCTAssertEqual(jumpBackIn.map(\.id), ["road", "copy", "cooking"])
     }
 
@@ -72,12 +78,17 @@ final class HomePersonalizerTests: XCTestCase {
         )
     }
 
-    private func playlist(_ id: String, name: String, ownerID: String) -> SpotifyPlaylistSummary {
+    private func playlist(
+        _ id: String,
+        name: String,
+        ownerID: String,
+        description: String? = nil
+    ) -> SpotifyPlaylistSummary {
         SpotifyPlaylistSummary(
             id: id,
             name: name,
             uri: "spotify:playlist:\(id)",
-            description: nil,
+            description: description,
             images: [],
             owner: SpotifyPlaylistOwner(id: ownerID, displayName: ownerID.capitalized)
         )

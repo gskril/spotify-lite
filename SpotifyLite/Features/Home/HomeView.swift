@@ -146,7 +146,15 @@ struct HomeView: View {
     }
 
     private var madeForYouRail: some View {
-        homeSection(title: "Made for you", subtitle: "Personalized playlists from Spotify") {
+        VStack(alignment: .leading, spacing: 13) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("MADE FOR")
+                    .font(.caption2.bold())
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+                Text(madeForName)
+                    .font(.title2.bold())
+            }
             horizontalRail {
                 ForEach(madeForYouPlaylists) { playlist in
                     PlaylistCard(
@@ -204,6 +212,11 @@ struct HomeView: View {
         case 12..<18: "Good afternoon"
         default: "Good evening"
         }
+    }
+
+    private var madeForName: String {
+        let name = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name?.isEmpty == false ? name ?? "You" : "You"
     }
 
     private var dayPart: String {
@@ -398,7 +411,8 @@ enum HomePersonalizer {
             || name.contains("time capsule")
             || name.contains("your top songs")
             || name.hasSuffix(" mix")
-            || description.contains("made for you")
+            || description.contains("daylist")
+            || description.contains("made for")
     }
 
     private static func normalized(_ value: String) -> String {
