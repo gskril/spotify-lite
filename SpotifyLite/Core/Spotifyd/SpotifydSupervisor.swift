@@ -50,11 +50,19 @@ actor SpotifydSupervisor: SpotifydManaging {
     private var outputBuffers: [OutputSource: Data] = [:]
     private var logTail: [String] = []
     private var stopWasRequested = false
+    private var audioOutputObservationTask: Task<Void, Never>?
+    private let defaultAudioOutputChanges: @Sendable () -> AsyncStream<Void>
 
     nonisolated var events: AsyncStream<SpotifydEvent> { eventBus.stream() }
 
-    init(configuration: SpotifydSupervisorConfiguration = .init()) {
+    init(
+        configuration: SpotifydSupervisorConfiguration = .init(),
+        defaultAudioOutputChanges: @escaping @Sendable () -> AsyncStream<Void> = {
+            SpotifydAudioOutput.defaultDeviceChanges()
+        }
+    ) {
         self.configuration = configuration
+        self.defaultAudioOutputChanges = defaultAudioOutputChanges
     }
 
     func setUserSelectedExecutableURL(_ url: URL?) {
@@ -156,6 +164,7 @@ actor SpotifydSupervisor: SpotifydManaging {
                 isAuthentication: false
             )
             child = launched
+            observeDefaultAudioOutput()
             eventBus.send(.stateChanged(.running(processID: launched.process.processIdentifier)))
         } catch {
             eventBus.send(.stateChanged(.crashed(status: -1)))
@@ -164,6 +173,7 @@ actor SpotifydSupervisor: SpotifydManaging {
     }
 
     func stop() async {
+        stopObservingDefaultAudioOutput()
         guard let running = child else {
             eventBus.send(.stateChanged(.stopped))
             return
@@ -206,8 +216,7 @@ actor SpotifydSupervisor: SpotifydManaging {
             let contents = SpotifydConfigurationFile.render(
                 deviceName: configuration.deviceName,
                 cacheDirectory: configuration.cacheDirectory,
-                maxCacheSizeBytes: configuration.maxCacheSizeBytes,
-                audioDeviceName: configuration.audioDeviceName
+                maxCacheSizeBytes: configuration.maxCacheSizeBytes
             )
             try Data(contents.utf8).write(to: configuration.configFile, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configuration.configFile.path)
@@ -352,6 +361,7 @@ actor SpotifydSupervisor: SpotifydManaging {
 
     private func childDidExit(identifier: UUID, status: Int32) {
         guard let running = child, running.identifier == identifier else { return }
+        stopObservingDefaultAudioOutput()
         flushOutputBuffers(for: identifier)
         clearHandlers(on: running)
         child = nil
@@ -369,6 +379,43 @@ actor SpotifydSupervisor: SpotifydManaging {
         child.standardOutput.fileHandleForReading.readabilityHandler = nil
         child.standardError.fileHandleForReading.readabilityHandler = nil
         child.process.terminationHandler = nil
+    }
+
+    private func observeDefaultAudioOutput() {
+        guard audioOutputObservationTask == nil else { return }
+        let changes = defaultAudioOutputChanges()
+        audioOutputObservationTask = Task { [weak self] in
+            for await _ in changes {
+                guard !Task.isCancelled else { return }
+                await self?.defaultAudioOutputDidChange()
+            }
+        }
+    }
+
+    private func stopObservingDefaultAudioOutput() {
+        audioOutputObservationTask?.cancel()
+        audioOutputObservationTask = nil
+    }
+
+    private func defaultAudioOutputDidChange() async {
+        guard let running = child,
+              running.process.isRunning,
+              !running.isAuthentication else { return }
+
+        // This method runs on the observation task. Detach it before stopping so stop() does
+        // not cancel the task while it is waiting for the receiver process to exit.
+        let previousObservationTask = audioOutputObservationTask
+        audioOutputObservationTask = nil
+        defer { previousObservationTask?.cancel() }
+
+        appendLog("macOS default audio output changed; restarting receiver")
+        await stop()
+        do {
+            try await start()
+            eventBus.send(.connectionInterrupted)
+        } catch {
+            appendLog("Could not restart receiver after audio output change: \(safeDescription(of: error))")
+        }
     }
 
     private func waitForExit(of process: Process, for duration: Duration) async {

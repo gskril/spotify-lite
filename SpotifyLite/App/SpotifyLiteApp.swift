@@ -66,9 +66,7 @@ struct SpotifyLiteApp: App {
         let clientIDStore = SpotifyClientIDStore()
         let authorizer = SpotifyAuthorizer(clientIDStore: clientIDStore)
         let api = SpotifyAPIClient(authorizer: authorizer)
-        let spotifyd = SpotifydSupervisor(configuration: .init(
-            audioDeviceName: SpotifydAudioOutput.recommendedDeviceName()
-        ))
+        let spotifyd = SpotifydSupervisor()
         let playbackCoordinator = PlaybackCoordinator(
             api: api,
             spotifyd: spotifyd,

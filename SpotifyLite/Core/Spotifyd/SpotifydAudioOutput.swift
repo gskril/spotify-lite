@@ -1,6 +1,74 @@
 import CoreAudio
 import Foundation
 
+private final class CoreAudioDefaultOutputObserver: @unchecked Sendable {
+    private static let systemObject = AudioObjectID(kAudioObjectSystemObject)
+    private static let address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "app.spotifylite.default-audio-output")
+    private var continuation: AsyncStream<Void>.Continuation?
+    private var isInstalled = false
+    private lazy var listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+        self?.emitChange()
+    }
+
+    func start(_ continuation: AsyncStream<Void>.Continuation) {
+        let shouldInstall = lock.withLock {
+            self.continuation = continuation
+            guard !isInstalled else { return false }
+            isInstalled = true
+            return true
+        }
+        guard shouldInstall else { return }
+
+        var address = Self.address
+        let status = AudioObjectAddPropertyListenerBlock(
+            Self.systemObject,
+            &address,
+            queue,
+            listener
+        )
+        guard status == noErr else {
+            lock.withLock {
+                isInstalled = false
+                self.continuation = nil
+            }
+            continuation.finish()
+            return
+        }
+    }
+
+    func stop() {
+        let shouldRemove = lock.withLock {
+            continuation = nil
+            guard isInstalled else { return false }
+            isInstalled = false
+            return true
+        }
+        guard shouldRemove else { return }
+
+        var address = Self.address
+        AudioObjectRemovePropertyListenerBlock(
+            Self.systemObject,
+            &address,
+            queue,
+            listener
+        )
+    }
+
+    private func emitChange() {
+        let activeContinuation: AsyncStream<Void>.Continuation? = lock.withLock {
+            self.continuation
+        }
+        activeContinuation?.yield(())
+    }
+}
+
 struct SpotifydAudioOutputDevice: Identifiable, Hashable, Sendable {
     let id: AudioDeviceID
     let name: String
@@ -30,21 +98,16 @@ enum SpotifydAudioOutput {
         }
     }
 
-    /// PortAudio in spotifyd 0.4.2 opens a two-channel stream. A mono default
-    /// device (commonly a Bluetooth hands-free profile) otherwise crashes it.
-    static func recommendedDeviceName(from devices: [SpotifydAudioOutputDevice] = availableDevices()) -> String? {
-        if let defaultDevice = devices.first(where: \.isDefault), defaultDevice.outputChannels >= 2 {
-            return nil
-        }
-        return devices.first(where: { $0.isBuiltIn && $0.outputChannels >= 2 })?.name
-            ?? devices.first(where: { $0.outputChannels >= 2 })?.name
+    static func statusDescription(from devices: [SpotifydAudioOutputDevice] = availableDevices()) -> String {
+        return devices.first(where: \.isDefault)?.name ?? "System default"
     }
 
-    static func statusDescription(from devices: [SpotifydAudioOutputDevice] = availableDevices()) -> String {
-        if let fallback = recommendedDeviceName(from: devices) {
-            return "\(fallback) (safe stereo fallback)"
+    static func defaultDeviceChanges() -> AsyncStream<Void> {
+        let observer = CoreAudioDefaultOutputObserver()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            continuation.onTermination = { _ in observer.stop() }
+            observer.start(continuation)
         }
-        return devices.first(where: \.isDefault)?.name ?? "System default"
     }
 
     private static func allDeviceIDs() -> [AudioDeviceID] {
