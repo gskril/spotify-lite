@@ -22,7 +22,12 @@ final class AppEnvironment: ObservableObject {
     @Published var sessionState: AppSessionState = .needsSetup
     @Published var selectedDestination: AppDestination? = .home
     @Published var playback: PlaybackState? {
-        didSet { systemMediaController.update(playback: playback) }
+        didSet {
+            systemMediaController.update(playback: playback)
+            if case .ready(let user) = sessionState {
+                playbackMemoryStore.save(playback, for: user.id)
+            }
+        }
     }
     @Published var spotifydState: SpotifydState = .stopped
     @Published var alertMessage: String?
@@ -36,18 +41,29 @@ final class AppEnvironment: ObservableObject {
     let spotifyd: any SpotifydManaging
     let playbackCoordinator: PlaybackCoordinator
     private let systemMediaController = SystemMediaController()
+    private let playbackMemoryStore: PlaybackMemoryStore
     private var keyboardMonitor: Any?
 
     init(
         authorizer: any SpotifyAuthorizing,
         api: any SpotifyAPIProviding,
         spotifyd: any SpotifydManaging,
-        playbackCoordinator: PlaybackCoordinator
+        playbackCoordinator: PlaybackCoordinator,
+        playbackMemoryStore: PlaybackMemoryStore = .init()
     ) {
         self.authorizer = authorizer
         self.api = api
         self.spotifyd = spotifyd
         self.playbackCoordinator = playbackCoordinator
+        self.playbackMemoryStore = playbackMemoryStore
+    }
+
+    func rememberedPlayback(for accountID: String) -> PlaybackState? {
+        playbackMemoryStore.load(for: accountID)
+    }
+
+    func clearRememberedPlayback() {
+        playbackMemoryStore.clear()
     }
 
     func report(_ error: Error) {
@@ -122,6 +138,10 @@ final class AppEnvironment: ObservableObject {
 
     func play() {
         guard playback?.isPlaying != true else { return }
+        if playback?.item != nil, playback?.device == nil {
+            runStartingPlayback { coordinator in try await coordinator.play() }
+            return
+        }
         playback?.isPlaying = true
         runPlaybackCommand { coordinator, _ in try await coordinator.play() }
     }

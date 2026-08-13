@@ -54,13 +54,15 @@ struct RootView: View {
             }
         }
         .onChange(of: environment.sessionState) { _, state in
-            guard case .ready = state else {
+            guard case .ready(let user) = state else {
                 Task { await environment.playbackCoordinator.setObservationActivity(.hidden) }
                 return
             }
             Task {
                 do {
-                    environment.playback = try await environment.playbackCoordinator.hydrateFromAccountHistory()
+                    environment.playback = try await environment.playbackCoordinator.hydrateFromAccountHistory(
+                        rememberedPlayback: environment.rememberedPlayback(for: user.id)
+                    )
                 } catch {
                     // Playback history is helpful startup state, not a reason to block the app.
                 }

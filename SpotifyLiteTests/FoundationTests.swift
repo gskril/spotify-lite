@@ -46,6 +46,44 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual([image].artworkURL(forPointSize: 150), image.url)
     }
 
+    func testPlaybackMemoryIsScopedToTheAccountAndRestoresPaused() {
+        let suiteName = "PlaybackMemoryStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = PlaybackMemoryStore(defaults: defaults, key: "fixture")
+        let track = SpotifyTrack(
+            id: "remembered",
+            name: "Remembered song",
+            uri: "spotify:track:remembered",
+            durationMS: 180_000,
+            explicit: false,
+            artists: [],
+            album: nil
+        )
+        let playback = PlaybackState(
+            item: track,
+            progressMS: 27_000,
+            isPlaying: true,
+            device: nil,
+            shuffle: true,
+            repeatMode: .track
+        )
+
+        store.save(playback, for: "account-a")
+
+        let restored = store.load(for: "account-a")
+        XCTAssertEqual(restored?.item, track)
+        XCTAssertEqual(restored?.progressMS, 0)
+        XCTAssertEqual(restored?.isPlaying, false)
+        XCTAssertNil(restored?.device)
+        XCTAssertEqual(restored?.shuffle, true)
+        XCTAssertEqual(restored?.repeatMode, .track)
+        XCTAssertNil(store.load(for: "account-b"))
+
+        store.clear()
+        XCTAssertNil(store.load(for: "account-a"))
+    }
+
     @MainActor
     func testSystemNowPlayingInfoContainsTrackState() {
         let track = SpotifyTrack(
