@@ -220,20 +220,24 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         switch request {
         case .resume:
             body = nil
-        case .uris(let uris, let offset):
+        case .uris(let uris, let offset, let positionMS):
             guard !uris.isEmpty else { throw SpotifyAPIError.invalidRequest("At least one track is required.") }
             if let offset, offset < 0 { throw SpotifyAPIError.invalidRequest("The playback offset cannot be negative.") }
+            if let positionMS, positionMS < 0 { throw SpotifyAPIError.invalidRequest("The playback position cannot be negative.") }
             body = try encode(StartPlaybackBody(
                 contextURI: nil,
                 uris: uris,
-                offset: offset.map { .init(position: $0, uri: nil) }
+                offset: offset.map { .init(position: $0, uri: nil) },
+                positionMS: positionMS
             ))
-        case .context(let uri, let offsetURI):
+        case .context(let uri, let offsetURI, let positionMS):
             guard !uri.isEmpty else { throw SpotifyAPIError.invalidRequest("A playback context is required.") }
+            if let positionMS, positionMS < 0 { throw SpotifyAPIError.invalidRequest("The playback position cannot be negative.") }
             body = try encode(StartPlaybackBody(
                 contextURI: uri,
                 uris: nil,
-                offset: offsetURI.map { .init(position: nil, uri: $0) }
+                offset: offsetURI.map { .init(position: nil, uri: $0) },
+                positionMS: positionMS
             ))
         }
         try await send(Endpoint(
@@ -567,12 +571,17 @@ private struct DevicesResponse: Decodable, Sendable {
 }
 
 private struct PlaybackResponse: Decodable, Sendable {
+    private struct Context: Decodable, Sendable {
+        let uri: String?
+    }
+
     let device: SpotifyDevice?
     let repeatState: RepeatMode?
     let shuffleState: Bool?
     let isPlaying: Bool?
     let progressMS: Int?
     let item: SpotifyTrack?
+    private let context: Context?
 
     enum CodingKeys: String, CodingKey {
         case device
@@ -581,6 +590,7 @@ private struct PlaybackResponse: Decodable, Sendable {
         case isPlaying = "is_playing"
         case progressMS = "progress_ms"
         case item
+        case context
     }
 
     init(from decoder: Decoder) throws {
@@ -591,6 +601,7 @@ private struct PlaybackResponse: Decodable, Sendable {
         isPlaying = try? container.decodeIfPresent(Bool.self, forKey: .isPlaying)
         progressMS = try? container.decodeIfPresent(Int.self, forKey: .progressMS)
         item = try? container.decodeIfPresent(SpotifyTrack.self, forKey: .item)
+        context = try? container.decodeIfPresent(Context.self, forKey: .context)
     }
 
     var domainModel: PlaybackState {
@@ -600,7 +611,8 @@ private struct PlaybackResponse: Decodable, Sendable {
             isPlaying: isPlaying ?? false,
             device: device,
             shuffle: shuffleState ?? false,
-            repeatMode: repeatState ?? .off
+            repeatMode: repeatState ?? .off,
+            contextURI: context?.uri
         )
     }
 }
@@ -698,10 +710,12 @@ private struct StartPlaybackBody: Encodable {
     let contextURI: String?
     let uris: [String]?
     let offset: PlaybackOffset?
+    let positionMS: Int?
 
     enum CodingKeys: String, CodingKey {
         case contextURI = "context_uri"
         case uris, offset
+        case positionMS = "position_ms"
     }
 }
 

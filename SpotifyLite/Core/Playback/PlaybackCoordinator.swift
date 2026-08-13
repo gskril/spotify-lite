@@ -43,6 +43,7 @@ struct PlaybackCoordinatorConfiguration: Sendable {
     var seekDebounceDelay: Duration = .milliseconds(180)
     var volumeDebounceDelay: Duration = .milliseconds(180)
     var activeRefreshInterval: Duration = .seconds(5)
+    var receiverRediscoveryTimeoutBeforeRestart: Duration = .seconds(3)
     var refreshAfterCommands: Bool = true
 }
 
@@ -183,7 +184,7 @@ actor PlaybackCoordinator {
     func refresh() async throws -> PlaybackState? {
         let state = try await api.playbackState()
         if let pendingSelectedTrackURI {
-            if state?.item?.uri == pendingSelectedTrackURI {
+            if state?.item?.uri == pendingSelectedTrackURI, state?.isPlaying == true {
                 self.pendingSelectedTrackURI = nil
                 pendingSelectedTrackDeadline = nil
             } else if let pendingSelectedTrackDeadline, clock.now < pendingSelectedTrackDeadline {
@@ -205,7 +206,9 @@ actor PlaybackCoordinator {
         }
         if state == nil, var remembered = serverPlayback, remembered.item != nil {
             remembered.isPlaying = false
-            remembered.device = nil
+            if let device = remembered.device {
+                remembered.device = Self.copy(device, isActive: false)
+            }
             setPlayback(remembered)
             return remembered
         }
@@ -216,13 +219,12 @@ actor PlaybackCoordinator {
         return state
     }
 
-    /// spotifyd can keep running after its Spotify session reports an unexpected shutdown. Its
-    /// built-in reconnect restores the device but not the playing context, so resume the exact
-    /// track and position that were authoritative immediately before the interruption.
-    func receiverConnectionInterrupted() {
+    /// spotifyd can keep running after its Spotify transport closes, or exit without preserving
+    /// its playing context. Refresh the receiver session and retain the exact track and position
+    /// that were authoritative immediately before the interruption.
+    func receiverConnectionInterrupted(restartReceiver: Bool = false) {
         guard receiverRecoveryTask == nil,
               let snapshot = currentPlayback(),
-              snapshot.isPlaying,
               snapshot.device?.name == receiverName,
               snapshot.item != nil else {
             return
@@ -231,7 +233,11 @@ actor PlaybackCoordinator {
         let identifier = UUID()
         receiverRecoveryIdentifier = identifier
         receiverRecoveryTask = Task { [weak self] in
-            await self?.runReceiverRecovery(snapshot: snapshot, identifier: identifier)
+            await self?.runReceiverRecovery(
+                snapshot: snapshot,
+                identifier: identifier,
+                restartReceiver: restartReceiver
+            )
         }
     }
 
@@ -321,7 +327,7 @@ actor PlaybackCoordinator {
         let previousPendingTrackURI = pendingSelectedTrackURI
         let previousPendingTrackDeadline = pendingSelectedTrackDeadline
         if let preview {
-            installPendingPreview(preview)
+            installPendingPreview(preview, request: playbackRequest)
         }
         do {
             try await serialized {
@@ -339,8 +345,7 @@ actor PlaybackCoordinator {
                         playback?.isPlaying = true
                     }
                 }) {
-                    try await self.spotifyd.start()
-                    let device = try await self.discoverReceiver()
+                    let device = try await self.prepareLocalReceiver()
                     guard let deviceID = device.id else {
                         throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: self.receiverName)
                     }
@@ -367,7 +372,7 @@ actor PlaybackCoordinator {
         }
     }
 
-    private func installPendingPreview(_ preview: SpotifyTrack) {
+    private func installPendingPreview(_ preview: SpotifyTrack, request: PlayRequest) {
         pendingSelectedTrackURI = preview.uri
         pendingSelectedTrackDeadline = clock.now.advanced(by: .seconds(12))
         serverPlayback = PlaybackState(
@@ -376,7 +381,8 @@ actor PlaybackCoordinator {
             isPlaying: true,
             device: serverPlayback?.device,
             shuffle: serverPlayback?.shuffle ?? false,
-            repeatMode: serverPlayback?.repeatMode ?? .off
+            repeatMode: serverPlayback?.repeatMode ?? .off,
+            contextURI: Self.contextURI(from: request) ?? serverPlayback?.contextURI
         )
         serverPlaybackTimestamp = clock.now
         eventBus.send(.stateChanged(serverPlayback))
@@ -386,7 +392,7 @@ actor PlaybackCoordinator {
         _ request: PlayRequest,
         preview: SpotifyTrack?
     ) -> PlayRequest {
-        guard case .uris(let uris, _) = request,
+        guard case .uris(let uris, _, let positionMS) = request,
               uris.count == 1,
               let preview,
               uris[0] == preview.uri,
@@ -395,14 +401,18 @@ actor PlaybackCoordinator {
         }
         // spotifyd needs a real context to establish its queue. A one-item URI list can
         // be acknowledged by the Web API but then rejected by the receiver.
-        return .context(uri: albumURI, offsetURI: preview.uri)
+        return .context(uri: albumURI, offsetURI: preview.uri, positionMS: positionMS)
+    }
+
+    private static func contextURI(from request: PlayRequest) -> String? {
+        guard case .context(let uri, _, _) = request else { return nil }
+        return uri
     }
 
     func resume() async throws {
         cancelReceiverRecovery()
         try await serialized {
-            try await self.spotifyd.start()
-            var device = try await self.discoverReceiver()
+            var device = try await self.prepareLocalReceiver()
             guard let deviceID = device.id else {
                 throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: self.receiverName)
             }
@@ -425,15 +435,52 @@ actor PlaybackCoordinator {
     }
 
     func play() async throws {
-        // A track without a device has no Spotify session to resume (normally this is the
-        // startup history fallback). Start that exact track on the local receiver so the
-        // first Play action matches what the player is showing.
-        if let track = serverPlayback?.item, serverPlayback?.device == nil {
-            try await playLocally(.uris([track.uri]), preview: track)
-            return
-        }
-        try await withReceiverCommand(optimistic: { $0?.isPlaying = true }, refreshAfter: false) { deviceID in
-            try await self.api.play(.resume, on: deviceID)
+        cancelReceiverRecovery()
+        let fallback = currentPlayback()
+        try await serialized {
+            if fallback?.item == nil || (
+                fallback?.device?.isActive == true && fallback?.device?.name != self.receiverName
+            ) {
+                let device = try await self.resolveCommandDevice()
+                guard let deviceID = device.id else {
+                    throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: device.name)
+                }
+                try await self.confirmingPlay(for: fallback?.item?.uri) {
+                    try await self.optimistically(updating: { $0?.isPlaying = true }) {
+                        try await self.api.play(.resume, on: deviceID)
+                    }
+                }
+                return
+            }
+
+            // Re-read the account before resuming. A long-idle Connect session may have either
+            // moved to another device or expired completely while the UI still has a useful
+            // paused snapshot.
+            if let live = try await self.api.playbackState() {
+                self.setPlayback(live)
+                let device = try await self.commandDevice(for: live)
+                guard let deviceID = device.id else {
+                    throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: device.name)
+                }
+                try await self.confirmingPlay(for: live.item?.uri) {
+                    try await self.optimistically(updating: { playback in
+                        playback?.isPlaying = true
+                        playback?.device = Self.copy(device, isActive: true)
+                    }) {
+                        try await self.api.play(.resume, on: deviceID)
+                    }
+                }
+                return
+            }
+
+            // Spotify returns 204 after an idle session ages out. Recreate the last confirmed
+            // context atomically at its saved position instead of issuing a context-less resume.
+            if let fallback, fallback.item != nil {
+                let device = try await self.prepareLocalReceiver()
+                try await self.restore(fallback, on: device)
+                return
+            }
+
         }
     }
 
@@ -588,8 +635,44 @@ actor PlaybackCoordinator {
         return matching
     }
 
-    private func discoverReceiver() async throws -> SpotifyDevice {
-        let deadline = clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
+    private func commandDevice(for playback: PlaybackState) async throws -> SpotifyDevice {
+        guard playback.device?.name == receiverName else {
+            return try await resolveCommandDevice()
+        }
+
+        var device = try await prepareLocalReceiver()
+        guard let deviceID = device.id else {
+            throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: receiverName)
+        }
+        if !device.isActive {
+            try await api.transferPlayback(to: deviceID, play: false)
+            device = try await waitUntilReceiverIsActive(expectedID: deviceID)
+        }
+        updateReceiver(device)
+        return device
+    }
+
+    private func prepareLocalReceiver() async throws -> SpotifyDevice {
+        try await spotifyd.start()
+        do {
+            return try await discoverReceiver(
+                timeout: min(
+                    configuration.receiverDiscoveryTimeout,
+                    configuration.receiverRediscoveryTimeoutBeforeRestart
+                )
+            )
+        } catch let error as PlaybackCoordinatorError {
+            guard case .receiverNotFound = error else { throw error }
+            // A spotifyd process can survive while its Connect session no longer advertises a
+            // device. One bounded restart gives it a clean session and a freshly discovered ID.
+            await spotifyd.stop()
+            try await spotifyd.start()
+            return try await discoverReceiver(timeout: configuration.receiverDiscoveryTimeout)
+        }
+    }
+
+    private func discoverReceiver(timeout: Duration? = nil) async throws -> SpotifyDevice {
+        let deadline = clock.now.advanced(by: timeout ?? configuration.receiverDiscoveryTimeout)
         var delay = configuration.initialDiscoveryDelay
         repeat {
             try Task.checkCancellation()
@@ -647,7 +730,69 @@ actor PlaybackCoordinator {
         eventBus.send(.stateChanged(state))
     }
 
-    private func runReceiverRecovery(snapshot: PlaybackState, identifier: UUID) async {
+    private func restore(_ snapshot: PlaybackState, on device: SpotifyDevice) async throws {
+        guard let track = snapshot.item,
+              let deviceID = device.id else {
+            throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: receiverName)
+        }
+
+        let position = min(max(0, snapshot.progressMS), track.durationMS)
+        let request = Self.restorationRequest(for: snapshot, positionMS: position)
+        try await confirmingPlay(for: track.uri) {
+            try await optimistically(updating: { playback in
+                var restored = snapshot
+                restored.progressMS = position
+                restored.isPlaying = true
+                restored.device = Self.copy(device, isActive: true)
+                playback = restored
+            }) {
+                try await api.play(request, on: deviceID)
+            }
+            if let activeDevice = serverPlayback?.device {
+                updateReceiver(activeDevice)
+            }
+        }
+    }
+
+    private func confirmingPlay(
+        for trackURI: String?,
+        operation: () async throws -> Void
+    ) async throws {
+        let previousPendingTrackURI = pendingSelectedTrackURI
+        let previousPendingTrackDeadline = pendingSelectedTrackDeadline
+        if let trackURI {
+            pendingSelectedTrackURI = trackURI
+            pendingSelectedTrackDeadline = clock.now.advanced(by: .seconds(12))
+        }
+        do {
+            try await operation()
+        } catch {
+            pendingSelectedTrackURI = previousPendingTrackURI
+            pendingSelectedTrackDeadline = previousPendingTrackDeadline
+            throw error
+        }
+    }
+
+    private static func restorationRequest(
+        for snapshot: PlaybackState,
+        positionMS: Int
+    ) -> PlayRequest {
+        guard let track = snapshot.item else { return .resume }
+        if let contextURI = snapshot.contextURI,
+           contextURI.hasPrefix("spotify:album:") || contextURI.hasPrefix("spotify:playlist:") {
+            return .context(uri: contextURI, offsetURI: track.uri, positionMS: positionMS)
+        }
+        if let albumURI = track.album?.uri {
+            return .context(uri: albumURI, offsetURI: track.uri, positionMS: positionMS)
+        }
+        return .uris([track.uri], positionMS: positionMS)
+    }
+
+    private func runReceiverRecovery(
+        snapshot: PlaybackState,
+        identifier: UUID,
+        restartReceiver: Bool
+    ) async {
         defer {
             if receiverRecoveryIdentifier == identifier {
                 receiverRecoveryTask = nil
@@ -656,45 +801,53 @@ actor PlaybackCoordinator {
         }
 
         guard let track = snapshot.item else { return }
-        let request = Self.contextualized(.uris([track.uri]), preview: track)
-        let position = min(max(0, snapshot.progressMS), track.durationMS)
         let deadline = clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
         var delay = configuration.initialDiscoveryDelay
+
+        do {
+            if restartReceiver {
+                await spotifyd.stop()
+            }
+            try await spotifyd.start()
+        } catch {
+            eventBus.send(.commandFailed(Self.safeMessage(error)))
+            return
+        }
 
         while clock.now < deadline {
             guard !Task.isCancelled,
                   receiverRecoveryIdentifier == identifier,
-                  serverPlayback?.isPlaying == true,
+                  serverPlayback?.isPlaying == snapshot.isPlaying,
                   serverPlayback?.item?.uri == track.uri else {
                 return
             }
 
             do {
-                if let active = try await api.playbackState() {
-                    if active.isPlaying || active.device?.name != receiverName {
-                        setPlayback(active)
-                        return
-                    }
+                if let active = try await api.playbackState(),
+                   active.device?.name != receiverName {
+                    setPlayback(active)
+                    return
                 }
 
                 let devices = try await api.devices()
                 if let device = devices.first(where: { $0.name == receiverName }),
                    let deviceID = device.id {
                     try Task.checkCancellation()
-                    try await api.play(request, on: deviceID)
-                    if position > 0 {
-                        try await Task.sleep(for: .milliseconds(250))
-                        try Task.checkCancellation()
-                        try await api.seek(to: position, on: deviceID)
-                    }
-
                     var restored = snapshot
-                    let activeDevice = Self.copy(device, isActive: true)
-                    restored.progressMS = position
-                    restored.isPlaying = true
-                    restored.device = activeDevice
+                    let recoveredDevice = Self.copy(device, isActive: snapshot.isPlaying)
+                    restored.device = recoveredDevice
+                    if snapshot.isPlaying {
+                        let position = min(max(0, snapshot.progressMS), track.durationMS)
+                        try await confirmingPlay(for: track.uri) {
+                            try await api.play(
+                                Self.restorationRequest(for: snapshot, positionMS: position),
+                                on: deviceID
+                            )
+                        }
+                        restored.progressMS = position
+                    }
                     setPlayback(restored)
-                    updateReceiver(activeDevice)
+                    updateReceiver(recoveredDevice)
                     return
                 }
             } catch is CancellationError {

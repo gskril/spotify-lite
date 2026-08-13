@@ -66,7 +66,8 @@ final class FoundationTests: XCTestCase {
             isPlaying: true,
             device: nil,
             shuffle: true,
-            repeatMode: .track
+            repeatMode: .track,
+            contextURI: "spotify:playlist:remembered"
         )
 
         store.save(playback, for: "account-a")
@@ -78,6 +79,7 @@ final class FoundationTests: XCTestCase {
         XCTAssertNil(restored?.device)
         XCTAssertEqual(restored?.shuffle, true)
         XCTAssertEqual(restored?.repeatMode, .track)
+        XCTAssertEqual(restored?.contextURI, "spotify:playlist:remembered")
         XCTAssertNil(store.load(for: "account-b"))
 
         store.clear()

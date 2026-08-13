@@ -94,7 +94,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, ["playback"])
     }
 
-    func testReceiverInterruptionRestartsExactTrackAndSeeksToLastPosition() async throws {
+    func testReceiverInterruptionRestartsExactTrackAtLastPositionAtomically() async throws {
         let track = makeTrack(
             id: "recover",
             name: "Recover me",
@@ -116,9 +116,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
                 nil
             ]
         )
+        let daemon = SpotifydManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            spotifyd: daemon,
             receiverName: oldDevice.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -129,19 +130,21 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
 
         _ = try await coordinator.refresh()
-        await coordinator.receiverConnectionInterrupted()
-        try await waitForAPICall(api, prefix: "seek:")
+        await coordinator.receiverConnectionInterrupted(restartReceiver: true)
+        try await waitForAPICall(api, prefix: "play:")
         try await Task.sleep(for: .milliseconds(10))
 
         let calls = await api.calls
+        let daemonCalls = await daemon.calls
         let playback = await coordinator.currentPlayback()
         XCTAssertEqual(calls.prefix(4), [
             "playback",
             "playback",
             "devices",
-            "play:local-new:context(spotify:album:recover-album)"
+            "play:local-new:context(spotify:album:recover-album)@27000"
         ])
-        XCTAssertTrue(calls.last?.hasPrefix("seek:27") == true)
+        XCTAssertFalse(calls.contains(where: { $0.hasPrefix("seek:") }))
+        XCTAssertEqual(daemonCalls, ["stop", "start"])
         XCTAssertEqual(playback?.item, track)
         XCTAssertEqual(playback?.device?.id, "local-new")
         XCTAssertEqual(playback?.isPlaying, true)
@@ -183,17 +186,28 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(apiCalls, [
             "playback",
             "recently-played",
+            "playback",
             "devices",
-            "play:local-v1:context(spotify:album:recent-album)"
+            "play:local-v1:context(spotify:album:recent-album)@0"
         ])
         XCTAssertEqual(playback?.item, recent)
-        XCTAssertEqual(playback?.device, receiver)
+        XCTAssertEqual(playback?.device?.id, receiver.id)
+        XCTAssertEqual(playback?.device?.isActive, true)
         XCTAssertEqual(playback?.isPlaying, true)
     }
 
     func testPlayResumesExistingStartupSessionOnItsDevice() async throws {
         let current = makeTrack(id: "current", name: "Current song")
-        let device = makeDevice(id: "remote-v1", active: true)
+        let device = SpotifyDevice(
+            id: "remote-v1",
+            isActive: true,
+            isPrivateSession: false,
+            isRestricted: false,
+            name: "Phone",
+            type: "smartphone",
+            volumePercent: 50,
+            supportsVolume: true
+        )
         let state = PlaybackState(
             item: current,
             progressMS: 12_000,
@@ -407,6 +421,79 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
         let calls = await api.calls
         XCTAssertEqual(calls, ["devices", "play:active:resume"])
+    }
+
+    func testPlayRestoresExpiredPausedSessionWithContextAndPosition() async throws {
+        let track = makeTrack(id: "paused", name: "Paused song")
+        let stale = makeDevice(id: "local-old", active: true)
+        let fresh = makeDevice(id: "local-new", active: false)
+        let paused = PlaybackState(
+            item: track,
+            progressMS: 72_000,
+            isPlaying: false,
+            device: stale,
+            shuffle: true,
+            repeatMode: .context,
+            contextURI: "spotify:playlist:long-session"
+        )
+        let confirmed = PlaybackState(
+            item: track,
+            progressMS: 72_500,
+            isPlaying: true,
+            device: Self.copyDevice(fresh, active: true),
+            shuffle: true,
+            repeatMode: .context,
+            contextURI: "spotify:playlist:long-session"
+        )
+        let api = PlaybackAPISpy(
+            deviceResponses: [[fresh]],
+            playbackResponses: [paused, nil, nil, paused, confirmed]
+        )
+        let daemon = SpotifydManagerSpy()
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: daemon,
+            receiverName: stale.name,
+            configuration: .init(
+                receiverDiscoveryTimeout: .seconds(1),
+                initialDiscoveryDelay: .milliseconds(1),
+                maximumDiscoveryDelay: .milliseconds(5),
+                refreshAfterCommands: false
+            )
+        )
+
+        _ = try await coordinator.refresh()
+        _ = try await coordinator.refresh()
+        let expired = await coordinator.currentPlayback()
+        try await coordinator.play()
+        _ = try await coordinator.refresh()
+        let heldAcrossStaleSameTrackResponse = await coordinator.currentPlayback()
+        _ = try await coordinator.refresh()
+
+        let calls = await api.calls
+        let daemonCalls = await daemon.calls
+        let restored = await coordinator.currentPlayback()
+        XCTAssertEqual(expired?.item, track)
+        XCTAssertEqual(expired?.progressMS, 72_000)
+        XCTAssertEqual(expired?.device?.id, "local-old")
+        XCTAssertEqual(expired?.device?.isActive, false)
+        XCTAssertEqual(calls, [
+            "playback",
+            "playback",
+            "playback",
+            "devices",
+            "play:local-new:context(spotify:playlist:long-session)@72000",
+            "playback",
+            "playback"
+        ])
+        XCTAssertEqual(daemonCalls, ["start"])
+        XCTAssertEqual(restored?.item, track)
+        XCTAssertEqual(restored?.device?.id, "local-new")
+        XCTAssertTrue(restored?.isPlaying == true)
+        XCTAssertGreaterThanOrEqual(restored?.progressMS ?? 0, 72_000)
+        XCTAssertEqual(restored?.contextURI, "spotify:playlist:long-session")
+        XCTAssertEqual(heldAcrossStaleSameTrackResponse?.device?.id, "local-new")
+        XCTAssertTrue(heldAcrossStaleSameTrackResponse?.isPlaying == true)
     }
 
     func testConcurrentCommandsAreSerialized() async throws {
@@ -657,6 +744,19 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
     }
 
+    private static func copyDevice(_ device: SpotifyDevice, active: Bool) -> SpotifyDevice {
+        SpotifyDevice(
+            id: device.id,
+            isActive: active,
+            isPrivateSession: device.isPrivateSession,
+            isRestricted: device.isRestricted,
+            name: device.name,
+            type: device.type,
+            volumePercent: device.volumePercent,
+            supportsVolume: device.supportsVolume
+        )
+    }
+
     private func waitForPlaybackCalls(_ api: PlaybackAPISpy, count: Int) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(1))
@@ -771,8 +871,10 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     private func describe(_ request: PlayRequest) -> String {
         switch request {
         case .resume: "resume"
-        case .uris(let uris, _): "uris(\(uris.joined(separator: ",")))"
-        case .context(let uri, _): "context(\(uri))"
+        case .uris(let uris, _, let positionMS):
+            "uris(\(uris.joined(separator: ",")))\(positionMS.map { "@\($0)" } ?? "")"
+        case .context(let uri, _, let positionMS):
+            "context(\(uri))\(positionMS.map { "@\($0)" } ?? "")"
         }
     }
 }

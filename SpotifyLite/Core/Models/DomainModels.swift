@@ -143,6 +143,7 @@ struct PlaybackState: Sendable, Equatable {
     var device: SpotifyDevice?
     var shuffle: Bool
     var repeatMode: RepeatMode
+    var contextURI: String? = nil
 }
 
 struct PlaybackQueue: Sendable, Equatable {
@@ -162,8 +163,8 @@ struct SearchResults: Sendable, Equatable {
 }
 
 enum PlayRequest: Sendable, Equatable {
-    case uris([String], offset: Int? = nil)
-    case context(uri: String, offsetURI: String? = nil)
+    case uris([String], offset: Int? = nil, positionMS: Int? = nil)
+    case context(uri: String, offsetURI: String? = nil, positionMS: Int? = nil)
     case resume
 }
 

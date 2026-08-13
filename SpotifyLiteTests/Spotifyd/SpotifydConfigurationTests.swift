@@ -16,6 +16,7 @@ final class SpotifydConfigurationTests: XCTestCase {
         XCTAssertTrue(rendered.contains(#"cache_path = "/tmp/cache \\\"folder""#))
         XCTAssertTrue(rendered.contains(#"backend = "portaudio""#))
         XCTAssertTrue(rendered.contains(#"volume_controller = "softvol""#))
+        XCTAssertTrue(rendered.contains("no_audio_cache = true"))
         XCTAssertTrue(rendered.contains("max_cache_size = 123456"))
         XCTAssertFalse(rendered.contains("\ndevice = "))
         XCTAssertFalse(rendered.contains("~"))
@@ -53,6 +54,9 @@ final class SpotifydConfigurationTests: XCTestCase {
     func testUnexpectedSessionShutdownIsRecognizedAsConnectionInterruption() {
         XCTAssertTrue(SpotifydSupervisor.isConnectionInterruption(
             "[stdout] [WARN] unexpected shutdown"
+        ))
+        XCTAssertTrue(SpotifydSupervisor.isConnectionInterruption(
+            "[stdout] [ERROR] Connection to server closed."
         ))
         XCTAssertFalse(SpotifydSupervisor.isConnectionInterruption(
             "[stdout] [WARN] couldn't load context info"

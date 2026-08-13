@@ -63,7 +63,8 @@ enum SpotifydConfigurationFile {
         device_name = \(tomlString(deviceName))
         device_type = "computer"
         cache_path = \(tomlString(cacheDirectory.path))
-        no_audio_cache = false
+        # Avoid replaying partial audio files left behind by a dropped long-running session.
+        no_audio_cache = true
         max_cache_size = \(max(0, maxCacheSizeBytes))
         backend = "portaudio"
         volume_controller = "softvol"

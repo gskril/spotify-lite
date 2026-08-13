@@ -7,6 +7,7 @@ struct PlaybackMemoryStore {
         let progressMS: Int?
         let shuffle: Bool
         let repeatMode: RepeatMode
+        let contextURI: String?
     }
 
     private let defaults: UserDefaults
@@ -29,7 +30,8 @@ struct PlaybackMemoryStore {
             track: track,
             progressMS: min(max(0, playback.progressMS), track.durationMS),
             shuffle: playback.shuffle,
-            repeatMode: playback.repeatMode
+            repeatMode: playback.repeatMode,
+            contextURI: playback.contextURI
         )
         guard let data = try? encoder.encode(record) else { return }
         defaults.set(data, forKey: key)
@@ -47,7 +49,8 @@ struct PlaybackMemoryStore {
             isPlaying: false,
             device: nil,
             shuffle: record.shuffle,
-            repeatMode: record.repeatMode
+            repeatMode: record.repeatMode,
+            contextURI: record.contextURI
         )
     }
 

@@ -98,8 +98,8 @@ Navigation and playback actions are also available in the app's native menus. Th
 
 - Spotify Web API access and refresh tokens are stored in Keychain.
 - The public client ID, last displayed track, and non-secret preferences are stored in `UserDefaults`.
-- Generated configuration, `spotifyd` credentials/cache, and bounded logs live under `~/Library/Application Support/SpotifyLite/`.
-- The receiver cache is bounded to 1 GB by the generated configuration; each retained log file is bounded to approximately 512 KB.
+- Generated configuration, `spotifyd` credentials/cache metadata, and bounded logs live under `~/Library/Application Support/SpotifyLite/`.
+- Audio-file caching is disabled so an interrupted download cannot poison a later playback session; each retained log file is bounded to approximately 512 KB.
 - OAuth codes, tokens, PKCE values, callback parameters, and `spotifyd` credentials must never be committed or written to diagnostics.
 
 ## Project documentation

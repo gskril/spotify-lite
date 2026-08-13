@@ -203,6 +203,59 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.first?.url?.path, "/v1/me/player/queue")
     }
 
+    func testPlaybackStateRetainsContextNeededForSessionRecovery() async throws {
+        let body = #"{"device":{"id":"local","is_active":false,"is_private_session":false,"is_restricted":false,"name":"This Mac","type":"computer","supports_volume":true},"repeat_state":"context","shuffle_state":true,"is_playing":false,"progress_ms":42000,"context":{"uri":"spotify:playlist:session"},"item":{"id":"track","name":"Track","uri":"spotify:track:track","duration_ms":180000,"explicit":false,"artists":[]}}"#
+        let recorder = APIRequestRecorder(responses: [.init(status: 200, body: body)])
+        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
+        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
+
+        let playback = try await api.playbackState()
+
+        XCTAssertEqual(playback?.contextURI, "spotify:playlist:session")
+        XCTAssertEqual(playback?.progressMS, 42_000)
+        XCTAssertEqual(playback?.item?.uri, "spotify:track:track")
+    }
+
+    func testStartPlaybackEncodesPositionWithContextInSingleRequest() async throws {
+        let recorder = APIRequestRecorder(responses: [.init(status: 204, body: "")])
+        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
+        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
+
+        try await api.play(
+            .context(
+                uri: "spotify:playlist:session",
+                offsetURI: "spotify:track:track",
+                positionMS: 42_000
+            ),
+            on: "fresh-device"
+        )
+
+        let request = try XCTUnwrap(recorder.requests.first)
+        let body = try XCTUnwrap(requestBodyData(request))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let offset = try XCTUnwrap(json["offset"] as? [String: Any])
+        XCTAssertEqual(request.url?.path, "/v1/me/player/play")
+        XCTAssertEqual(request.url?.query, "device_id=fresh-device")
+        XCTAssertEqual(json["context_uri"] as? String, "spotify:playlist:session")
+        XCTAssertEqual(json["position_ms"] as? Int, 42_000)
+        XCTAssertEqual(offset["uri"] as? String, "spotify:track:track")
+    }
+
+    private func requestBodyData(_ request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data.isEmpty ? nil : data
+    }
+
     func testPlaylistDetailLoadsMetadataAndAllItemPagesLossTolerantly() async throws {
         let detail = #"{"id":"playlist","name":"Updated name","uri":"spotify:playlist:playlist","description":"Detail description","images":[],"items":{"items":[{"item":{"id":"one","name":"One","uri":"spotify:track:one","duration_ms":100,"explicit":false,"artists":[]}},null,{"item":null}],"next":"https://unit.test/v1/playlists/playlist/items?offset=3"}}"#
         let nextPage = #"{"items":[{"item":{"id":"two","name":"Two","uri":"spotify:track:two","duration_ms":200,"explicit":false,"artists":[]}},"unavailable"],"next":null}"#

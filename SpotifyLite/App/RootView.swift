@@ -185,8 +185,10 @@ struct RootView: View {
             guard !Task.isCancelled else { return }
             switch event {
             case .stateChanged(let state): environment.spotifydState = state
-            case .connectionInterrupted:
-                await environment.playbackCoordinator.receiverConnectionInterrupted()
+            case .connectionInterrupted(let restartReceiver):
+                await environment.playbackCoordinator.receiverConnectionInterrupted(
+                    restartReceiver: restartReceiver
+                )
             case .exited(let status):
                 if status == 0 { environment.spotifydState = .stopped }
                 else { environment.spotifydState = .crashed(status: status) }

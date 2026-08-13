@@ -61,6 +61,7 @@ user-read-recently-played
 - [x] Serialize commands and support play, pause, previous, next, seek, shuffle, repeat, volume, queue append at the service layer, and device transfer.
 - [x] Optimistically update clicked tracks and locally interpolate progress.
 - [x] Reconcile playback every five seconds only while the app is active; refresh after commands and when the app becomes active; stop reconciliation while hidden/backgrounded.
+- [x] Preserve paused context and position across expired Connect sessions, restart the receiver after transport loss, and restore playback atomically on a freshly discovered device ID.
 - [x] Hydrate Now Playing at authenticated startup from the current account session, falling back to one most-recently-played item when Spotify reports no active session.
 - [x] Publish native Now Playing metadata and handle play/pause, previous, and next media-key commands.
 
@@ -174,7 +175,7 @@ The project uses filesystem-synchronized groups. `SpotifyLite.xcodeproj` is gene
 - [x] Library pagination and playlist restricted states do not block the main UI.
 - [x] The app makes no background playback-state requests while hidden.
 - [x] No client ID, token, credential file, or personal machine name is committed to the repository.
-- [x] The macOS test suite currently contains 49 passing tests.
+- [x] The macOS test suite currently contains 61 passing tests.
 - [ ] The formal live playback/failure matrix and long-duration soak pass with Spotify Desktop closed.
 - [ ] Repeatable Release performance measurements are recorded and remain stable during a 60-minute session.
 

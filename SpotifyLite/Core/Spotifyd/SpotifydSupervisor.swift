@@ -324,14 +324,17 @@ actor SpotifydSupervisor: SpotifydManaging {
             logTail.removeFirst(logTail.count - configuration.logTailLineLimit)
         }
         eventBus.send(.log(line))
-        if Self.isConnectionInterruption(line) {
-            eventBus.send(.connectionInterrupted)
+        if !stopWasRequested,
+           child?.isAuthentication != true,
+           Self.isConnectionInterruption(line) {
+            eventBus.send(.connectionInterrupted(restartReceiver: true))
         }
         appendToRotatingLog(line)
     }
 
     static func isConnectionInterruption(_ line: String) -> Bool {
         line.localizedCaseInsensitiveContains("unexpected shutdown")
+            || line.localizedCaseInsensitiveContains("connection to server closed")
     }
 
     private func appendToRotatingLog(_ line: String) {
@@ -365,6 +368,9 @@ actor SpotifydSupervisor: SpotifydManaging {
         flushOutputBuffers(for: identifier)
         clearHandlers(on: running)
         child = nil
+        if !stopWasRequested, !running.isAuthentication {
+            eventBus.send(.connectionInterrupted(restartReceiver: false))
+        }
         eventBus.send(.exited(status: status))
         if stopWasRequested {
             eventBus.send(.stateChanged(.stopped))
@@ -412,7 +418,7 @@ actor SpotifydSupervisor: SpotifydManaging {
         await stop()
         do {
             try await start()
-            eventBus.send(.connectionInterrupted)
+            eventBus.send(.connectionInterrupted(restartReceiver: false))
         } catch {
             appendLog("Could not restart receiver after audio output change: \(safeDescription(of: error))")
         }
