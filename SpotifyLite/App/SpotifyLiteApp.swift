@@ -7,6 +7,10 @@ final class SpotifyLiteAppDelegate: NSObject, NSApplicationDelegate {
     private var terminationPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // This process owns the local audio receiver. AppKit's automatic/sudden termination
+        // would otherwise tear down active playback when the app has been idle or hidden.
+        ProcessInfo.processInfo.disableAutomaticTermination("Spotify Lite manages local playback")
+        ProcessInfo.processInfo.disableSuddenTermination()
         NSApp.invalidateRestorableState()
         NotificationCenter.default.addObserver(
             self,

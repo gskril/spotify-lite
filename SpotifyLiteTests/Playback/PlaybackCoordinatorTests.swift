@@ -85,13 +85,67 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(hydrated?.item, local)
-        XCTAssertEqual(hydrated?.progressMS, 0)
+        XCTAssertEqual(hydrated?.progressMS, 42_000)
         XCTAssertEqual(hydrated?.isPlaying, false)
         XCTAssertNil(hydrated?.device)
         XCTAssertEqual(hydrated?.shuffle, true)
         XCTAssertEqual(hydrated?.repeatMode, .context)
         let calls = await api.calls
         XCTAssertEqual(calls, ["playback"])
+    }
+
+    func testReceiverInterruptionRestartsExactTrackAndSeeksToLastPosition() async throws {
+        let track = makeTrack(
+            id: "recover",
+            name: "Recover me",
+            albumURI: "spotify:album:recover-album"
+        )
+        let oldDevice = makeDevice(id: "local-old", active: true)
+        let reconnectedDevice = makeDevice(id: "local-new", active: false)
+        let api = PlaybackAPISpy(
+            deviceResponses: [[reconnectedDevice]],
+            playbackResponses: [
+                PlaybackState(
+                    item: track,
+                    progressMS: 27_000,
+                    isPlaying: true,
+                    device: oldDevice,
+                    shuffle: false,
+                    repeatMode: .off
+                ),
+                nil
+            ]
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: SpotifydManagerSpy(),
+            receiverName: oldDevice.name,
+            configuration: .init(
+                receiverDiscoveryTimeout: .seconds(1),
+                initialDiscoveryDelay: .milliseconds(1),
+                maximumDiscoveryDelay: .milliseconds(5),
+                refreshAfterCommands: false
+            )
+        )
+
+        _ = try await coordinator.refresh()
+        await coordinator.receiverConnectionInterrupted()
+        try await waitForAPICall(api, prefix: "seek:")
+        try await Task.sleep(for: .milliseconds(10))
+
+        let calls = await api.calls
+        let playback = await coordinator.currentPlayback()
+        XCTAssertEqual(calls.prefix(4), [
+            "playback",
+            "playback",
+            "devices",
+            "play:local-new:context(spotify:album:recover-album)"
+        ])
+        XCTAssertTrue(calls.last?.hasPrefix("seek:27") == true)
+        XCTAssertEqual(playback?.item, track)
+        XCTAssertEqual(playback?.device?.id, "local-new")
+        XCTAssertEqual(playback?.isPlaying, true)
+        XCTAssertGreaterThanOrEqual(playback?.progressMS ?? 0, 27_000)
     }
 
     func testPlayStartsRememberedHistoryTrackOnLocalReceiver() async throws {

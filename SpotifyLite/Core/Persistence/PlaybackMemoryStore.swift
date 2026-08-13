@@ -4,6 +4,7 @@ struct PlaybackMemoryStore {
     private struct Record: Codable {
         let accountID: String
         let track: SpotifyTrack
+        let progressMS: Int?
         let shuffle: Bool
         let repeatMode: RepeatMode
     }
@@ -26,6 +27,7 @@ struct PlaybackMemoryStore {
         let record = Record(
             accountID: accountID,
             track: track,
+            progressMS: min(max(0, playback.progressMS), track.durationMS),
             shuffle: playback.shuffle,
             repeatMode: playback.repeatMode
         )
@@ -41,7 +43,7 @@ struct PlaybackMemoryStore {
         }
         return PlaybackState(
             item: record.track,
-            progressMS: 0,
+            progressMS: min(max(0, record.progressMS ?? 0), record.track.durationMS),
             isPlaying: false,
             device: nil,
             shuffle: record.shuffle,

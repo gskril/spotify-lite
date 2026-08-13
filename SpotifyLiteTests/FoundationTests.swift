@@ -46,7 +46,7 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual([image].artworkURL(forPointSize: 150), image.url)
     }
 
-    func testPlaybackMemoryIsScopedToTheAccountAndRestoresPaused() {
+    func testPlaybackMemoryIsScopedToTheAccountAndRestoresPositionPaused() {
         let suiteName = "PlaybackMemoryStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -73,7 +73,7 @@ final class FoundationTests: XCTestCase {
 
         let restored = store.load(for: "account-a")
         XCTAssertEqual(restored?.item, track)
-        XCTAssertEqual(restored?.progressMS, 0)
+        XCTAssertEqual(restored?.progressMS, 27_000)
         XCTAssertEqual(restored?.isPlaying, false)
         XCTAssertNil(restored?.device)
         XCTAssertEqual(restored?.shuffle, true)

@@ -62,6 +62,7 @@ extension SpotifyAPIProviding {
 enum SpotifydEvent: Sendable, Equatable {
     case stateChanged(SpotifydState)
     case log(String)
+    case connectionInterrupted
     case exited(status: Int32)
 }
 

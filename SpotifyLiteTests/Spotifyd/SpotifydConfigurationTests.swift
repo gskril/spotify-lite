@@ -51,6 +51,15 @@ final class SpotifydConfigurationTests: XCTestCase {
         XCTAssertTrue(redacted.contains("Bearer <redacted>"))
     }
 
+    func testUnexpectedSessionShutdownIsRecognizedAsConnectionInterruption() {
+        XCTAssertTrue(SpotifydSupervisor.isConnectionInterruption(
+            "[stdout] [WARN] unexpected shutdown"
+        ))
+        XCTAssertFalse(SpotifydSupervisor.isConnectionInterruption(
+            "[stdout] [WARN] couldn't load context info"
+        ))
+    }
+
     func testSupervisorOnlyReturnsSupportedLocations() async {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let supervisor = SpotifydSupervisor(configuration: .init(applicationSupportDirectory: root))

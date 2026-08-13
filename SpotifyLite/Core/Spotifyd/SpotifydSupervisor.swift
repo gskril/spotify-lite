@@ -315,7 +315,14 @@ actor SpotifydSupervisor: SpotifydManaging {
             logTail.removeFirst(logTail.count - configuration.logTailLineLimit)
         }
         eventBus.send(.log(line))
+        if Self.isConnectionInterruption(line) {
+            eventBus.send(.connectionInterrupted)
+        }
         appendToRotatingLog(line)
+    }
+
+    static func isConnectionInterruption(_ line: String) -> Bool {
+        line.localizedCaseInsensitiveContains("unexpected shutdown")
     }
 
     private func appendToRotatingLog(_ line: String) {
@@ -327,7 +334,8 @@ actor SpotifydSupervisor: SpotifydManaging {
             try? FileManager.default.moveItem(at: logURL, to: oldURL)
         }
 
-        let data = Data((line + "\n").utf8)
+        let timestampedLine = "[\(Date().ISO8601Format())] \(line)"
+        let data = Data((timestampedLine + "\n").utf8)
         if !FileManager.default.fileExists(atPath: logURL.path) {
             FileManager.default.createFile(atPath: logURL.path, contents: data, attributes: [.posixPermissions: 0o600])
             return
