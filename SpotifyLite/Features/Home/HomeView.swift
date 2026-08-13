@@ -14,7 +14,9 @@ struct HomeView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
                 welcomeHeader
-                receiverBanner
+                if shouldShowReceiverPrompt {
+                    receiverStartPrompt
+                }
 
                 if isLoading {
                     LoadingView(message: "Building your home mix…")
@@ -53,7 +55,7 @@ struct HomeView: View {
         }
     }
 
-    private var receiverBanner: some View {
+    private var receiverStartPrompt: some View {
         HStack(spacing: 12) {
             Image(systemName: receiverSymbol)
                 .foregroundStyle(receiverColor)
@@ -69,6 +71,11 @@ struct HomeView: View {
         .spotifyCard()
     }
 
+    private var shouldShowReceiverPrompt: Bool {
+        if case .running = environment.spotifydState { return false }
+        return true
+    }
+
     @ViewBuilder private var receiverAction: some View {
         switch environment.spotifydState {
         case .stopped:
@@ -80,9 +87,7 @@ struct HomeView: View {
         case .starting:
             ProgressView().controlSize(.small)
         case .running:
-            Label("Ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(AppTheme.accent)
-                .font(.callout.weight(.medium))
+            EmptyView()
         }
     }
 
@@ -270,7 +275,7 @@ struct HomeView: View {
 
     private var receiverTitle: String {
         switch environment.spotifydState {
-        case .running: "Local receiver is running"
+        case .running: "Local receiver is ready"
         case .starting: "Starting local receiver…"
         case .notInstalled: "Install the local receiver"
         case .needsAuthentication: "Finish receiver sign-in"
