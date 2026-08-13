@@ -15,17 +15,22 @@ final class HomePersonalizerTests: XCTestCase {
         XCTAssertEqual(first.count, 3)
     }
 
-    func testPersonalizedSpotifyPlaylistsComeBeforeOrdinaryPlaylists() {
+    func testSpotifyGeneratedAndJumpBackInRowsAreStrictlySeparated() {
         let playlists = [
-            playlist("road", name: "Road Trip"),
-            playlist("daylist", name: "Tuesday afternoon daylist"),
-            playlist("discover", name: "Discover Weekly"),
-            playlist("cooking", name: "Cooking")
+            playlist("road", name: "Road Trip", ownerID: "listener"),
+            playlist("daylist", name: "Tuesday afternoon daylist", ownerID: "spotify"),
+            playlist("daily", name: "Daily Mix 2", ownerID: "spotify"),
+            playlist("discover", name: "Discover Weekly", ownerID: "spotify"),
+            playlist("copy", name: "Discover Weekly Saved 12", ownerID: "listener"),
+            playlist("chill", name: "Chill Mix", ownerID: "spotify"),
+            playlist("cooking", name: "Cooking", ownerID: "listener")
         ]
 
-        let result = HomePersonalizer.prioritizedPlaylists(playlists, limit: 4)
+        let madeForYou = HomePersonalizer.spotifyGeneratedPlaylists(playlists, limit: 12)
+        let jumpBackIn = HomePersonalizer.jumpBackInPlaylists(playlists, limit: 12)
 
-        XCTAssertEqual(result.map(\.id), ["daylist", "discover", "road", "cooking"])
+        XCTAssertEqual(madeForYou.map(\.id), ["daylist", "daily", "discover", "chill"])
+        XCTAssertEqual(jumpBackIn.map(\.id), ["road", "copy", "cooking"])
     }
 
     func testRecentAlbumsAndArtistsStayUniqueAndRespectLimits() {
@@ -67,13 +72,14 @@ final class HomePersonalizerTests: XCTestCase {
         )
     }
 
-    private func playlist(_ id: String, name: String) -> SpotifyPlaylistSummary {
+    private func playlist(_ id: String, name: String, ownerID: String) -> SpotifyPlaylistSummary {
         SpotifyPlaylistSummary(
             id: id,
             name: name,
             uri: "spotify:playlist:\(id)",
             description: nil,
-            images: []
+            images: [],
+            owner: SpotifyPlaylistOwner(id: ownerID, displayName: ownerID.capitalized)
         )
     }
 }

@@ -616,6 +616,7 @@ private struct PlaylistDetailResponse: Decodable, Sendable {
     let uri: String?
     let description: String?
     let images: [SpotifyImage]?
+    let owner: SpotifyPlaylistOwner?
     let items: SpotifyPage<LossTolerant<PlaylistItemResponse>>?
 
     init(from decoder: Decoder) throws {
@@ -625,6 +626,7 @@ private struct PlaylistDetailResponse: Decodable, Sendable {
         uri = try? container.decodeIfPresent(String.self, forKey: .uri)
         description = try? container.decodeIfPresent(String.self, forKey: .description)
         images = try? container.decodeIfPresent([SpotifyImage].self, forKey: .images)
+        owner = try? container.decodeIfPresent(SpotifyPlaylistOwner.self, forKey: .owner)
         items = try? container.decodeIfPresent(SpotifyPage<LossTolerant<PlaylistItemResponse>>.self, forKey: .items)
     }
 
@@ -634,12 +636,13 @@ private struct PlaylistDetailResponse: Decodable, Sendable {
             name: name ?? fallback.name,
             uri: uri ?? fallback.uri,
             description: description ?? fallback.description,
-            images: images ?? fallback.images
+            images: images ?? fallback.images,
+            owner: owner ?? fallback.owner
         )
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, uri, description, images, items
+        case id, name, uri, description, images, owner, items
     }
 }
 

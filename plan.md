@@ -65,7 +65,7 @@ user-read-recently-played
 
 ### User interface
 
-- [x] Home with recent listening, prioritized personalized playlist names, recent albums, and a locally generated time-of-day mix.
+- [x] Home with a locally generated time-of-day mix, a strict Spotify-personalized playlist row, and a separate remaining-playlists row.
 - [x] Browsable generated-mix detail with separate Play and per-track actions.
 - [x] Lazy, paginated Library sections for liked songs, albums, and playlists.
 - [x] Debounced catalog Search across tracks, albums, artists, and playlists.
@@ -81,7 +81,7 @@ user-read-recently-played
 
 ### Home personalization
 
-Spotify does not expose its private Home recommendation feed through the Web API. “Made for this moment” is therefore generated locally by deterministically reshuffling unique recent tracks for the current time bucket. The “Made for you” rail prioritizes returned playlists whose names or descriptions resemble daylist, Daily Mix, Discover Weekly, Release Radar, On Repeat, and related mixes. The UI must not describe the local mix as an official Spotify recommendation.
+Spotify does not expose its private Home recommendation feed through the Web API. “Made for this moment” is therefore generated locally by deterministically reshuffling unique recent tracks for the current time bucket. The “Made for you” rail uses returned playlist owner metadata plus recognized titles to include Spotify-personalized staples such as daylist, Daily Mix, Discover Weekly, Release Radar, On Repeat, and related mixes. All remaining returned playlists keep their API order in “Jump back in.” This classification adds no API traffic, and the UI must not describe the local mix as an official Spotify recommendation.
 
 ### Queue
 
@@ -173,7 +173,7 @@ The project uses filesystem-synchronized groups. `SpotifyLite.xcodeproj` is gene
 - [x] Library pagination and playlist restricted states do not block the main UI.
 - [x] The app makes no background playback-state requests while hidden.
 - [x] No client ID, token, credential file, or personal machine name is committed to the repository.
-- [x] The macOS test suite currently contains 48 passing tests.
+- [x] The macOS test suite currently contains 49 passing tests.
 - [ ] The formal live playback/failure matrix and long-duration soak pass with Spotify Desktop closed.
 - [ ] Repeatable Release performance measurements are recorded and remain stable during a 60-minute session.
 

@@ -76,12 +76,23 @@ struct SpotifyTrack: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+struct SpotifyPlaylistOwner: Codable, Sendable, Equatable {
+    let id: String
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+    }
+}
+
 struct SpotifyPlaylistSummary: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String
     let uri: String
     let description: String?
     let images: [SpotifyImage]
+    let owner: SpotifyPlaylistOwner?
 }
 
 enum SpotifyPlaylistItemAccess: Sendable, Equatable {

@@ -7,7 +7,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 ## What works
 
 - Native Home, Library, Search, Settings, playlist detail, and player views.
-- A locally generated “Made for this moment” mix based on recent listening, plus prioritization of Spotify playlists such as daylist, Daily Mix, Discover Weekly, and Release Radar when Spotify returns them.
+- A locally generated “Made for this moment” mix based on recent listening, a strict “Made for you” row for Spotify-personalized playlists such as daylist, Daily Mix, Discover Weekly, and Release Radar, and a separate “Jump back in” playlist row.
 - Paginated liked songs, saved albums, and playlists.
 - Playlist song browsing for playlists Spotify exposes in Development Mode.
 - Track, album, artist, playlist, and generated-mix playback.
@@ -89,7 +89,7 @@ Navigation and playback actions are also available in the app's native menus. Th
 - Spotify Free playback control is unsupported.
 - Queue display is read-only. Spotify's Web API can append an item but cannot remove or arbitrarily reorder the current playback queue; Spotify Lite does not yet expose an append action.
 - Podcasts, audiobooks, local files, offline downloads, lyrics, playlist editing, and Spotify's private Home recommendation feed are out of scope.
-- Album cards currently start the album context rather than opening an album-track detail screen.
+- Albums are browsable from Library and Search, but selecting an album currently starts its context rather than opening an album-track detail screen.
 - `spotifyd` is an unofficial GPL-3.0 client based on the reverse-engineered `librespot` protocol. Spotify changes can break local playback.
 - A formal long-duration playback, crash-recovery, and multi-output-device release matrix is still outstanding.
 

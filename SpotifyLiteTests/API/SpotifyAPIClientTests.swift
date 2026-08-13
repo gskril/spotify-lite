@@ -164,6 +164,19 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.last?.url?.query, "offset=50")
     }
 
+    func testCurrentUserPlaylistsDecodesOwnerMetadataForHomeClassification() async throws {
+        let body = #"{"items":[{"id":"discover","name":"Discover Weekly","uri":"spotify:playlist:discover","description":"Your weekly mixtape","images":[],"owner":{"id":"spotify","display_name":"Spotify"}}],"next":null}"#
+        let recorder = APIRequestRecorder(responses: [.init(status: 200, body: body)])
+        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
+        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
+
+        let playlists = try await api.currentUserPlaylists()
+
+        XCTAssertEqual(playlists.first?.id, "discover")
+        XCTAssertEqual(playlists.first?.owner, SpotifyPlaylistOwner(id: "spotify", displayName: "Spotify"))
+        XCTAssertEqual(recorder.requests.first?.url?.path, "/v1/me/playlists")
+    }
+
     func testLibraryMutationUsesNewUnifiedEndpointAndSpotifyURI() async throws {
         let recorder = APIRequestRecorder(responses: [.init(status: 200, body: "")])
         APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
@@ -266,7 +279,8 @@ final class SpotifyAPIClientTests: XCTestCase {
             name: "Fallback name",
             uri: "spotify:playlist:playlist",
             description: "Fallback description",
-            images: []
+            images: [],
+            owner: nil
         )
     }
 }

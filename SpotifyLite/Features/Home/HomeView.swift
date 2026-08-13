@@ -30,9 +30,8 @@ struct HomeView: View {
                     .frame(minHeight: 300)
                 } else {
                     if !dayMix.isEmpty { dayMixHero }
-                    if !personalizedPlaylists.isEmpty { playlistRail }
-                    if !recentAlbums.isEmpty { albumRail }
-                    if !recentTracks.isEmpty { recentRail }
+                    if !madeForYouPlaylists.isEmpty { madeForYouRail }
+                    if !jumpBackInPlaylists.isEmpty { jumpBackInRail }
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle")
                             .font(.callout)
@@ -146,10 +145,10 @@ struct HomeView: View {
         .accessibilityLabel("Open \(dayMixTitle), \(dayMix.count) songs")
     }
 
-    private var playlistRail: some View {
-        homeSection(title: "Made for you", subtitle: "Your Spotify mixes and playlists, close at hand") {
+    private var madeForYouRail: some View {
+        homeSection(title: "Made for you", subtitle: "Personalized playlists from Spotify") {
             horizontalRail {
-                ForEach(personalizedPlaylists) { playlist in
+                ForEach(madeForYouPlaylists) { playlist in
                     PlaylistCard(
                         playlist: playlist,
                         artworkSize: 154,
@@ -161,31 +160,16 @@ struct HomeView: View {
         }
     }
 
-    private var albumRail: some View {
-        homeSection(title: "Jump back in", subtitle: "Albums from your recent listening") {
+    private var jumpBackInRail: some View {
+        homeSection(title: "Jump back in", subtitle: "More playlists from your library") {
             horizontalRail {
-                ForEach(recentAlbums) { album in
-                    mediaTile(
-                        title: album.name,
-                        subtitle: album.artists.map(\.name).joined(separator: ", "),
-                        artwork: album.images.artworkURL(forPointSize: 154),
-                        symbol: "square.stack"
-                    ) { playContext(album.uri) }
-                }
-            }
-        }
-    }
-
-    private var recentRail: some View {
-        homeSection(title: "Recently played", subtitle: "Pick up where you left off") {
-            horizontalRail {
-                ForEach(Array(recentTracks.prefix(12))) { track in
-                    mediaTile(
-                        title: track.name,
-                        subtitle: track.artists.map(\.name).joined(separator: ", "),
-                        artwork: track.album?.images.artworkURL(forPointSize: 154),
-                        symbol: "music.note"
-                    ) { playTracks([track]) }
+                ForEach(jumpBackInPlaylists) { playlist in
+                    PlaylistCard(
+                        playlist: playlist,
+                        artworkSize: 154,
+                        onOpen: { environment.presentPlaylist(playlist) },
+                        onPlay: { playContext(playlist.uri) }
+                    )
                 }
             }
         }
@@ -212,34 +196,6 @@ struct HomeView: View {
         }
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.viewAligned)
-    }
-
-    private func mediaTile(
-        title: String,
-        subtitle: String,
-        artwork: URL?,
-        symbol: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 9) {
-                ZStack(alignment: .bottomTrailing) {
-                    ArtworkView(url: artwork, size: 154, cornerRadius: 11, symbol: symbol)
-                    Image(systemName: "play.fill")
-                        .font(.headline)
-                        .foregroundStyle(.black)
-                        .frame(width: 38, height: 38)
-                        .background(AppTheme.accent, in: Circle())
-                        .shadow(radius: 6, y: 3)
-                        .padding(8)
-                }
-                Text(title).fontWeight(.semibold).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
-            .frame(width: 154, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Play \(title), \(subtitle)")
     }
 
     private var greeting: String {
@@ -280,12 +236,12 @@ struct HomeView: View {
             : "Featuring \(artists.joined(separator: ", ")) and more. Refreshed throughout your week."
     }
 
-    private var personalizedPlaylists: [SpotifyPlaylistSummary] {
-        HomePersonalizer.prioritizedPlaylists(playlists, limit: 10)
+    private var madeForYouPlaylists: [SpotifyPlaylistSummary] {
+        HomePersonalizer.spotifyGeneratedPlaylists(playlists, limit: 12)
     }
 
-    private var recentAlbums: [SpotifyAlbumSummary] {
-        HomePersonalizer.uniqueAlbums(from: recentTracks, limit: 10)
+    private var jumpBackInPlaylists: [SpotifyPlaylistSummary] {
+        HomePersonalizer.jumpBackInPlaylists(playlists, limit: 12)
     }
 
     private var receiverSymbol: String {
@@ -346,12 +302,6 @@ struct HomeView: View {
         isLoading = false
     }
 
-    private func playTracks(_ tracks: [SpotifyTrack]) {
-        let uris = tracks.map(\.uri)
-        guard !uris.isEmpty else { return }
-        environment.playLocally(.uris(uris), preview: tracks.first)
-    }
-
     private func playContext(_ uri: String) {
         environment.playLocally(.context(uri: uri))
     }
@@ -386,20 +336,18 @@ enum HomePersonalizer {
             .map { $0 }
     }
 
-    static func prioritizedPlaylists(
+    static func spotifyGeneratedPlaylists(
         _ playlists: [SpotifyPlaylistSummary],
         limit: Int
     ) -> [SpotifyPlaylistSummary] {
-        let signals = [
-            "daylist", "daily mix", "discover weekly", "release radar",
-            "on repeat", "repeat rewind", "made for", "mix"
-        ]
-        let personalized = playlists.filter { playlist in
-            let text = "\(playlist.name) \(playlist.description ?? "")".lowercased()
-            return signals.contains { text.contains($0) }
-        }
-        let remainder = playlists.filter { candidate in !personalized.contains(where: { $0.id == candidate.id }) }
-        return Array((personalized + remainder).prefix(limit))
+        Array(playlists.filter(isSpotifyGenerated).prefix(limit))
+    }
+
+    static func jumpBackInPlaylists(
+        _ playlists: [SpotifyPlaylistSummary],
+        limit: Int
+    ) -> [SpotifyPlaylistSummary] {
+        Array(playlists.filter { !isSpotifyGenerated($0) }.prefix(limit))
     }
 
     static func uniqueAlbums(from tracks: [SpotifyTrack], limit: Int) -> [SpotifyAlbumSummary] {
@@ -420,5 +368,41 @@ enum HomePersonalizer {
 
     private static func stableScore(_ value: String) -> UInt64 {
         value.utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+    }
+
+    private static func isSpotifyGenerated(_ playlist: SpotifyPlaylistSummary) -> Bool {
+        let name = normalized(playlist.name)
+        let description = normalized(playlist.description ?? "")
+        let ownerID = normalized(playlist.owner?.id ?? "")
+        let ownerName = normalized(playlist.owner?.displayName ?? "")
+        let isSpotifyOwned = ownerID == "spotify" || ownerName == "spotify"
+
+        // These titles identify Spotify's personalized staples even when older or
+        // restricted payloads omit owner metadata.
+        let knownTitle = name == "discover weekly"
+            || name == "release radar"
+            || name == "on repeat"
+            || name == "repeat rewind"
+            || name == "your time capsule"
+            || name.hasSuffix(" daylist")
+            || name.range(of: #"^daily mix [1-9][0-9]*$"#, options: .regularExpression) != nil
+        if knownTitle { return true }
+
+        guard isSpotifyOwned else { return false }
+        return name.contains("daylist")
+            || name.contains("daily mix")
+            || name.contains("discover weekly")
+            || name.contains("release radar")
+            || name.contains("on repeat")
+            || name.contains("repeat rewind")
+            || name.contains("time capsule")
+            || name.contains("your top songs")
+            || name.hasSuffix(" mix")
+            || description.contains("made for you")
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
