@@ -8,6 +8,7 @@ struct SpotifydSupervisorConfiguration: Sendable {
     var logTailLineLimit: Int
     var logFileMaxBytes: Int
     var gracefulStopDelay: Duration
+    var keepAliveRestartDelay: Duration
 
     init(
         userSelectedExecutableURL: URL? = nil,
@@ -16,7 +17,8 @@ struct SpotifydSupervisorConfiguration: Sendable {
         maxCacheSizeBytes: Int = 1_000_000_000,
         logTailLineLimit: Int = 300,
         logFileMaxBytes: Int = 512_000,
-        gracefulStopDelay: Duration = .seconds(2)
+        gracefulStopDelay: Duration = .seconds(2),
+        keepAliveRestartDelay: Duration = .seconds(1)
     ) {
         self.userSelectedExecutableURL = userSelectedExecutableURL
         self.applicationSupportDirectory = applicationSupportDirectory
@@ -25,6 +27,7 @@ struct SpotifydSupervisorConfiguration: Sendable {
         self.logTailLineLimit = max(1, logTailLineLimit)
         self.logFileMaxBytes = max(8_192, logFileMaxBytes)
         self.gracefulStopDelay = gracefulStopDelay
+        self.keepAliveRestartDelay = keepAliveRestartDelay
     }
 
     static var defaultApplicationSupportDirectory: URL {

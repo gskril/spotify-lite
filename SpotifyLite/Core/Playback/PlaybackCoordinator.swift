@@ -441,7 +441,26 @@ actor PlaybackCoordinator {
             if fallback?.item == nil || (
                 fallback?.device?.isActive == true && fallback?.device?.name != self.receiverName
             ) {
-                let device = try await self.resolveCommandDevice()
+                let device: SpotifyDevice
+                do {
+                    device = try await self.resolveCommandDevice()
+                } catch let error as PlaybackCoordinatorError {
+                    guard case .activeDeviceNotFound = error,
+                          let fallback,
+                          fallback.item != nil else {
+                        throw error
+                    }
+                    let receiver = try await self.prepareLocalReceiver()
+                    try await self.restore(fallback, on: receiver)
+                    return
+                }
+                if let fallback,
+                   fallback.item != nil,
+                   fallback.device?.name != self.receiverName,
+                   device.name == self.receiverName {
+                    try await self.restore(fallback, on: device)
+                    return
+                }
                 guard let deviceID = device.id else {
                     throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: device.name)
                 }

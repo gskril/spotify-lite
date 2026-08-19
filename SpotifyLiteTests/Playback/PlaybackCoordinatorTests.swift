@@ -245,6 +245,64 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(playback?.isPlaying, true)
     }
 
+    func testPlayFallsBackToLocalReceiverWhenRememberedRemoteDeviceIsGone() async throws {
+        let track = makeTrack(
+            id: "idle",
+            name: "Idle song",
+            albumURI: "spotify:album:idle-album"
+        )
+        let stalePhone = SpotifyDevice(
+            id: "phone-old",
+            isActive: true,
+            isPrivateSession: false,
+            isRestricted: false,
+            name: "iPhone",
+            type: "smartphone",
+            volumePercent: 50,
+            supportsVolume: true
+        )
+        let receiver = makeDevice(id: "local-new", active: false)
+        let api = PlaybackAPISpy(
+            deviceResponses: [[], [receiver]],
+            playbackResponses: [PlaybackState(
+                item: track,
+                progressMS: 61_000,
+                isPlaying: false,
+                device: stalePhone,
+                shuffle: false,
+                repeatMode: .off
+            )]
+        )
+        let daemon = SpotifydManagerSpy()
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            spotifyd: daemon,
+            receiverName: receiver.name,
+            configuration: .init(
+                receiverDiscoveryTimeout: .seconds(1),
+                initialDiscoveryDelay: .milliseconds(1),
+                maximumDiscoveryDelay: .milliseconds(5),
+                refreshAfterCommands: false
+            )
+        )
+
+        _ = try await coordinator.refresh()
+        try await coordinator.play()
+
+        let calls = await api.calls
+        let daemonCalls = await daemon.calls
+        let playback = await coordinator.currentPlayback()
+        XCTAssertEqual(calls, [
+            "playback",
+            "devices",
+            "devices",
+            "play:local-new:context(spotify:album:idle-album)@61000"
+        ])
+        XCTAssertEqual(daemonCalls, ["start"])
+        XCTAssertEqual(playback?.device?.id, "local-new")
+        XCTAssertTrue(playback?.isPlaying == true)
+    }
+
     func testLocalPlayUsesExplicitDeviceWithoutTransfer() async throws {
         let inactive = makeDevice(id: "local-v1", active: false)
         let api = PlaybackAPISpy(deviceResponses: [[inactive]])

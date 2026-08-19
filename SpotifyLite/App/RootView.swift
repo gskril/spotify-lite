@@ -5,7 +5,6 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SpotifyLitePreferences.clientIDKey) private var clientID = ""
     @AppStorage(SpotifyLitePreferences.premiumConfirmedKey) private var premiumConfirmed = false
-    @AppStorage(SpotifyLitePreferences.autoStartReceiverKey) private var autoStartReceiver = false
     @State private var didBootstrap = false
 
     var body: some View {
@@ -70,9 +69,8 @@ struct RootView: View {
                     scenePhase == .active ? .active : .hidden
                 )
             }
-            guard autoStartReceiver else { return }
             Task {
-                do { try await environment.spotifyd.start() }
+                do { try await environment.spotifyd.startKeepingAlive() }
                 catch SpotifydSupervisorError.authenticationRequired {
                     environment.spotifydState = .needsAuthentication
                 } catch { environment.report(error) }

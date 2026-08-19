@@ -87,4 +87,11 @@ protocol SpotifydManaging: Sendable {
     func authenticate() async throws
     func start() async throws
     func stop() async
+    func startKeepingAlive() async throws
+    func stopKeepingAlive() async
+}
+
+extension SpotifydManaging {
+    func startKeepingAlive() async throws { try await start() }
+    func stopKeepingAlive() async { await stop() }
 }

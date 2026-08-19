@@ -150,6 +150,52 @@ final class SpotifydConfigurationTests: XCTestCase {
         }
     }
 
+    func testKeepAliveRefreshesReceiverAfterConnectSessionCloses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let support = root.appendingPathComponent("support", isDirectory: true)
+        let cache = support.appendingPathComponent("spotifyd-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: cache.appendingPathComponent("credentials.json"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let executable = root.appendingPathComponent("spotifyd")
+        let script = """
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then
+          echo "spotifyd 0.4.2"
+          exit 0
+        fi
+        echo "receiver-launched"
+        if [ ! -f "connect-interrupted-once" ]; then
+          touch "connect-interrupted-once"
+          echo "Connection to server closed."
+        fi
+        trap 'exit 0' TERM INT
+        while :; do sleep 1; done
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        let supervisor = SpotifydSupervisor(configuration: .init(
+            userSelectedExecutableURL: executable,
+            applicationSupportDirectory: support,
+            gracefulStopDelay: .seconds(2),
+            keepAliveRestartDelay: .milliseconds(20)
+        ))
+
+        do {
+            try await supervisor.startKeepingAlive()
+            let didRelaunch = await waitForLaunchCount(2, supervisor: supervisor)
+            XCTAssertTrue(didRelaunch)
+            let log = await supervisor.recentLogLines().joined(separator: "\n")
+            XCTAssertTrue(log.contains("Refreshing stale Spotify Connect receiver session"))
+            await supervisor.stopKeepingAlive()
+        } catch {
+            await supervisor.stopKeepingAlive()
+            throw error
+        }
+    }
+
     private func waitForLaunchCount(_ count: Int, supervisor: SpotifydSupervisor) async -> Bool {
         for _ in 0..<100 {
             let lines = await supervisor.recentLogLines()

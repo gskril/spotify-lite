@@ -50,6 +50,8 @@ actor SpotifydSupervisor: SpotifydManaging {
     private var outputBuffers: [OutputSource: Data] = [:]
     private var logTail: [String] = []
     private var stopWasRequested = false
+    private var keepAliveRequested = false
+    private var keepAliveRestartTask: Task<Void, Never>?
     private var audioOutputObservationTask: Task<Void, Never>?
     private let defaultAudioOutputChanges: @Sendable () -> AsyncStream<Void>
 
@@ -170,6 +172,18 @@ actor SpotifydSupervisor: SpotifydManaging {
             eventBus.send(.stateChanged(.crashed(status: -1)))
             throw error
         }
+    }
+
+    func startKeepingAlive() async throws {
+        keepAliveRequested = true
+        try await start()
+    }
+
+    func stopKeepingAlive() async {
+        keepAliveRequested = false
+        keepAliveRestartTask?.cancel()
+        keepAliveRestartTask = nil
+        await stop()
     }
 
     func stop() async {
@@ -327,7 +341,14 @@ actor SpotifydSupervisor: SpotifydManaging {
         if !stopWasRequested,
            child?.isAuthentication != true,
            Self.isConnectionInterruption(line) {
-            eventBus.send(.connectionInterrupted(restartReceiver: true))
+            if keepAliveRequested {
+                // Tell playback recovery to hold its current snapshot while the supervisor
+                // refreshes the stale Connect session in the background.
+                eventBus.send(.connectionInterrupted(restartReceiver: false))
+                scheduleKeepAliveRestart(forceRestart: true)
+            } else {
+                eventBus.send(.connectionInterrupted(restartReceiver: true))
+            }
         }
         appendToRotatingLog(line)
     }
@@ -370,6 +391,7 @@ actor SpotifydSupervisor: SpotifydManaging {
         child = nil
         if !stopWasRequested, !running.isAuthentication {
             eventBus.send(.connectionInterrupted(restartReceiver: false))
+            scheduleKeepAliveRestart(forceRestart: false)
         }
         eventBus.send(.exited(status: status))
         if stopWasRequested {
@@ -385,6 +407,41 @@ actor SpotifydSupervisor: SpotifydManaging {
         child.standardOutput.fileHandleForReading.readabilityHandler = nil
         child.standardError.fileHandleForReading.readabilityHandler = nil
         child.process.terminationHandler = nil
+    }
+
+    private func scheduleKeepAliveRestart(forceRestart: Bool) {
+        guard keepAliveRequested, keepAliveRestartTask == nil else { return }
+        let delay = configuration.keepAliveRestartDelay
+        keepAliveRestartTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
+            await self?.performKeepAliveRestart(forceRestart: forceRestart)
+        }
+    }
+
+    private func performKeepAliveRestart(forceRestart: Bool) async {
+        keepAliveRestartTask = nil
+        guard keepAliveRequested else { return }
+
+        if forceRestart, child?.process.isRunning == true {
+            appendLog("Refreshing stale Spotify Connect receiver session")
+            await stop()
+        }
+        guard keepAliveRequested else { return }
+
+        do {
+            try await start()
+            // A recovery may have completed against the old registration before the forced
+            // restart. Re-notify it now that the replacement receiver is ready to be found.
+            if forceRestart {
+                eventBus.send(.connectionInterrupted(restartReceiver: false))
+            }
+        } catch {
+            appendLog("Could not keep receiver running: \(safeDescription(of: error))")
+        }
     }
 
     private func observeDefaultAudioOutput() {

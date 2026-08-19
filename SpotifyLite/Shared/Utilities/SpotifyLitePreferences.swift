@@ -4,7 +4,6 @@ enum SpotifyLitePreferences {
     // Shared with SpotifyClientIDStore in Core/Persistence.
     static let clientIDKey = "spotifyClientID"
     static let premiumConfirmedKey = "spotify.premiumConfirmed"
-    static let autoStartReceiverKey = "spotifyd.autoStart"
     static let receiverNameKey = "spotifyd.receiverName"
 
     // This exact URI must be allowlisted in Spotify's Developer Dashboard.

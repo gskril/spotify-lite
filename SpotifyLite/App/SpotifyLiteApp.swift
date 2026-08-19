@@ -49,7 +49,7 @@ final class SpotifyLiteAppDelegate: NSObject, NSApplicationDelegate {
         guard let spotifyd else { return .terminateNow }
         terminationPending = true
         Task {
-            await spotifyd.stop()
+            await spotifyd.stopKeepingAlive()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

@@ -17,7 +17,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 - Immediate optimistic player updates after selecting a track.
 - Five-second playback reconciliation only while the app is active; progress is interpolated locally and polling stops while the app is hidden or backgrounded.
 - Startup restores Spotify's current session, or shows Spotify Lite's last known track as paused when no device has an active session. Account history is used only when the app has not remembered a track yet.
-- Supervision of one app-owned `spotifyd` child process with private configuration, bounded redacted logs, and graceful shutdown.
+- Lightweight, session-long supervision of one app-owned `spotifyd` child process with private configuration, automatic Connect-session recovery, bounded redacted logs, and graceful shutdown.
 
 The app is source-built and unsigned. It is not currently packaged, notarized, or distributed as a finished consumer application.
 
@@ -72,7 +72,7 @@ After the first launch:
 1. Confirm Premium and connect Spotify with the Developer client ID.
 2. Open Settings and select **Authenticate** under Local receiver.
 3. Complete the separate `spotifyd` browser authorization.
-4. Start the receiver or leave it stopped; choosing local music starts it on demand.
+4. Leave Spotify Lite open. Its local receiver stays available in the background and stops when the app quits.
 
 The project uses filesystem-synchronized groups. Add Swift files under `SpotifyLite/` or tests under `SpotifyLiteTests/`, then run `xcodegen generate` or the build script. Do not hand-edit generated project entries for normal source additions.
 

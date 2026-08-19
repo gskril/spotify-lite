@@ -4,7 +4,6 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var environment: AppEnvironment
     @AppStorage(SpotifyLitePreferences.clientIDKey) private var clientID = ""
-    @AppStorage(SpotifyLitePreferences.autoStartReceiverKey) private var autoStartReceiver = false
     @AppStorage(SpotifyLitePreferences.receiverNameKey) private var receiverName = "Spotify Lite"
     @State private var installation: SpotifydInstallation?
     @State private var isWorking = false
@@ -79,7 +78,12 @@ struct SettingsView: View {
                     Divider()
                     TextField("Receiver name", text: $receiverName)
                         .textFieldStyle(.roundedBorder)
-                    Toggle("Start receiver when Spotify Lite opens", isOn: $autoStartReceiver)
+                    Label(
+                        "The receiver stays available while Spotify Lite is open and stops when the app quits.",
+                        systemImage: "bolt.horizontal.circle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 }
 
                 settingsSection("Playback behavior", symbol: "slider.horizontal.3") {
@@ -120,7 +124,7 @@ struct SettingsView: View {
     @ViewBuilder private var receiverAction: some View {
         switch environment.spotifydState {
         case .running, .starting:
-            Button("Stop", systemImage: "stop.fill") { stopReceiver() }.disabled(isWorking)
+            Button("Restart", systemImage: "arrow.clockwise") { restartReceiver() }.disabled(isWorking)
         default:
             Button("Start", systemImage: "play.fill") { startReceiver() }.disabled(installation?.isInstalled != true || isWorking)
         }
@@ -162,9 +166,9 @@ struct SettingsView: View {
         Task {
             do {
                 try await environment.spotifyd.authenticate()
+                try await environment.spotifyd.startKeepingAlive()
                 await MainActor.run {
-                    environment.spotifydState = .stopped
-                    statusMessage = "Receiver authentication completed."
+                    statusMessage = "Receiver authentication completed and the receiver is running."
                     isWorking = false
                 }
             } catch {
@@ -180,7 +184,7 @@ struct SettingsView: View {
         isWorking = true
         environment.spotifydState = .starting
         Task {
-            do { try await environment.spotifyd.start() }
+            do { try await environment.spotifyd.startKeepingAlive() }
             catch SpotifydSupervisorError.authenticationRequired {
                 await MainActor.run {
                     environment.spotifydState = .needsAuthentication
@@ -197,14 +201,20 @@ struct SettingsView: View {
         }
     }
 
-    private func stopReceiver() {
+    private func restartReceiver() {
         isWorking = true
         Task {
             await environment.spotifyd.stop()
-            await MainActor.run {
-                environment.spotifydState = .stopped
-                isWorking = false
+            do {
+                try await environment.spotifyd.startKeepingAlive()
+                await MainActor.run { statusMessage = "Receiver restarted." }
+            } catch {
+                await MainActor.run {
+                    environment.spotifydState = .crashed(status: -1)
+                    statusMessage = error.localizedDescription
+                }
             }
+            await MainActor.run { isWorking = false }
         }
     }
 
