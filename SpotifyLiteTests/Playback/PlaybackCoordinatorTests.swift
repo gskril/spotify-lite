@@ -151,6 +151,43 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(playback?.progressMS ?? 0, 27_000)
     }
 
+    func testRecoveryWaitsForReplacementAndHoldsSnapshotAcrossEmptyPoll() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let track = makeTrack(id: "held", name: "Held")
+        let state = PlaybackState(item: track, progressMS: 20_000, isPlaying: true,
+                                  device: device, shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [state, nil, nil])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        _ = try await coordinator.refresh()
+        await coordinator.receiverWillRestart()
+        _ = try await coordinator.refresh()
+        let waiting = await coordinator.currentPlayback()
+        let beforeReady = await api.calls
+        XCTAssertTrue(waiting?.isPlaying == true)
+        XCTAssertEqual(waiting?.item, track)
+        XCTAssertFalse(beforeReady.contains { $0.hasPrefix("play:") })
+        await coordinator.receiverConnectionInterrupted()
+        try await waitForAPICall(api, prefix: "play:")
+    }
+
+    func testRecoveryDoesNotRewindReceiverThatIsAlreadyPlaying() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let old = PlaybackState(item: makeTrack(id: "old", name: "Old"), progressMS: 20_000,
+                                isPlaying: true, device: device, shuffle: false, repeatMode: .off)
+        let live = PlaybackState(item: makeTrack(id: "live", name: "Live"), progressMS: 8_000,
+                                 isPlaying: true, device: device, shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [old, live])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        _ = try await coordinator.refresh()
+        await coordinator.receiverConnectionInterrupted()
+        try await waitForPlaybackCalls(api, count: 2)
+        try await Task.sleep(for: .milliseconds(20))
+        let calls = await api.calls
+        let result = await coordinator.currentPlayback()
+        XCTAssertFalse(calls.contains { $0.hasPrefix("play:") })
+        XCTAssertEqual(result?.item, live.item)
+    }
+
     func testPlayStartsRememberedHistoryTrackOnLocalReceiver() async throws {
         let recent = makeTrack(
             id: "recent",
@@ -305,7 +342,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
     func testLocalPlayUsesExplicitDeviceWithoutTransfer() async throws {
         let inactive = makeDevice(id: "local-v1", active: false)
-        let api = PlaybackAPISpy(deviceResponses: [[inactive]])
+        let api = PlaybackAPISpy(deviceResponses: [[inactive], [inactive]])
         let daemon = SpotifydManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
@@ -329,6 +366,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
             "devices",
             "play:local-v1:context(spotify:album:1)"
         ])
+        let selected = makeTrack(id: "selected", name: "Selected")
+        try await coordinator.playLocally(.context(uri: "spotify:playlist:test", offsetURI: selected.uri), preview: selected)
+        let preview = await coordinator.currentPlayback()
+        XCTAssertEqual(preview?.contextURI, "spotify:playlist:test")
     }
 
     func testKnownTrackUpdatesPlaybackImmediatelyWithoutReadingStaleServerState() async throws {
@@ -593,6 +634,23 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
         let calls = await api.calls
         XCTAssertEqual(calls, ["devices", "seek:42000:fresh"])
+    }
+
+    func testBackgroundLocalPlaybackKeepsRecoverySnapshotCurrent() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let first = PlaybackState(item: makeTrack(id: "first", name: "First"), progressMS: 20_000,
+                                  isPlaying: true, device: device, shuffle: false, repeatMode: .off)
+        let second = PlaybackState(item: makeTrack(id: "second", name: "Second"), progressMS: 1_000,
+                                   isPlaying: true, device: device, shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [], playbackResponses: [first, second])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name,
+            configuration: .init(backgroundRefreshInterval: .milliseconds(25)))
+        _ = try await coordinator.refresh()
+        await coordinator.setObservationActivity(.hidden)
+        try await waitForPlaybackCalls(api, count: 2)
+        try await Task.sleep(for: .milliseconds(5))
+        let current = await coordinator.currentPlayback()
+        XCTAssertEqual(current?.item, second.item)
     }
 
     func testBackgroundStopsPollingAndRefocusRefreshesImmediately() async throws {

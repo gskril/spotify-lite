@@ -43,6 +43,7 @@ struct PlaybackCoordinatorConfiguration: Sendable {
     var seekDebounceDelay: Duration = .milliseconds(180)
     var volumeDebounceDelay: Duration = .milliseconds(180)
     var activeRefreshInterval: Duration = .seconds(5)
+    var backgroundRefreshInterval: Duration = .seconds(15)
     var receiverRediscoveryTimeoutBeforeRestart: Duration = .seconds(3)
     var refreshAfterCommands: Bool = true
 }
@@ -104,6 +105,8 @@ actor PlaybackCoordinator {
     private var reconciliationTask: Task<Void, Never>?
     private var receiverRecoveryTask: Task<Void, Never>?
     private var receiverRecoveryIdentifier: UUID?
+    private var receiverRestartSnapshot: PlaybackState?
+    private var receiverRestartDeadline: ContinuousClock.Instant?
     private var pendingSeekTask: Task<Void, Never>?
     private var pendingVolumeTask: Task<Void, Never>?
     private var pendingSelectedTrackURI: String?
@@ -183,6 +186,13 @@ actor PlaybackCoordinator {
     @discardableResult
     func refresh() async throws -> PlaybackState? {
         let state = try await api.playbackState()
+        DiagnosticLog.shared.record("playback.observed", DiagnosticLog.playback(state))
+        if receiverRestartSnapshot != nil {
+            if let receiverRestartDeadline, clock.now < receiverRestartDeadline { return currentPlayback() }
+            DiagnosticLog.shared.record("recovery.restart_timeout")
+            receiverRestartSnapshot = nil
+            receiverRestartDeadline = nil
+        }
         if let pendingSelectedTrackURI {
             if state?.item?.uri == pendingSelectedTrackURI, state?.isPlaying == true {
                 self.pendingSelectedTrackURI = nil
@@ -222,9 +232,21 @@ actor PlaybackCoordinator {
     /// spotifyd can keep running after its Spotify transport closes, or exit without preserving
     /// its playing context. Refresh the receiver session and retain the exact track and position
     /// that were authoritative immediately before the interruption.
+    func receiverWillRestart() {
+        guard receiverRestartSnapshot == nil else { return }
+        receiverRestartSnapshot = currentPlayback()
+        receiverRestartDeadline = clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
+        cancelReceiverRecovery(clearSnapshot: false)
+        DiagnosticLog.shared.record("recovery.waiting_for_restart", DiagnosticLog.playback(receiverRestartSnapshot))
+    }
+
     func receiverConnectionInterrupted(restartReceiver: Bool = false) {
+        let saved = receiverRestartSnapshot
+        receiverRestartSnapshot = nil
+        receiverRestartDeadline = nil
+        DiagnosticLog.shared.record("recovery.interrupted", ["restart": String(restartReceiver)])
         guard receiverRecoveryTask == nil,
-              let snapshot = currentPlayback(),
+              let snapshot = saved ?? currentPlayback(),
               snapshot.device?.name == receiverName,
               snapshot.item != nil else {
             return
@@ -243,10 +265,10 @@ actor PlaybackCoordinator {
 
     func setObservationActivity(_ activity: PlaybackObservationActivity) {
         guard observationActivity != activity || reconciliationTask == nil else { return }
+        DiagnosticLog.shared.record("app.observation", ["activity": String(describing: activity)])
         observationActivity = activity
         reconciliationTask?.cancel()
         reconciliationTask = nil
-        guard activity != .hidden else { return }
         reconciliationTask = Task { [weak self] in
             await self?.runReconciliationLoop()
         }
@@ -261,6 +283,7 @@ actor PlaybackCoordinator {
     }
 
     func transferPlayback(to device: SpotifyDevice) async throws {
+        DiagnosticLog.shared.record("command.transferPlayback", ["target_device": device.id ?? "none"])
         cancelReceiverRecovery()
         guard !device.isRestricted else {
             throw PlaybackCoordinatorError.deviceRestricted(name: device.name)
@@ -320,6 +343,7 @@ actor PlaybackCoordinator {
     }
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) async throws {
+        DiagnosticLog.shared.record("command.playLocally", ["request": String(describing: request), "preview": preview?.uri ?? "none"])
         cancelReceiverRecovery()
         let playbackRequest = Self.contextualized(request, preview: preview)
         let originalPlayback = serverPlayback
@@ -339,7 +363,8 @@ actor PlaybackCoordinator {
                             isPlaying: true,
                             device: playback?.device,
                             shuffle: playback?.shuffle ?? false,
-                            repeatMode: playback?.repeatMode ?? .off
+                            repeatMode: playback?.repeatMode ?? .off,
+                            contextURI: Self.contextURI(from: playbackRequest)
                         )
                     } else {
                         playback?.isPlaying = true
@@ -410,6 +435,7 @@ actor PlaybackCoordinator {
     }
 
     func resume() async throws {
+        DiagnosticLog.shared.record("command.resume", DiagnosticLog.playback(currentPlayback()))
         cancelReceiverRecovery()
         try await serialized {
             var device = try await self.prepareLocalReceiver()
@@ -429,12 +455,14 @@ actor PlaybackCoordinator {
     }
 
     func pause() async throws {
+        DiagnosticLog.shared.record("command.pause", DiagnosticLog.playback(currentPlayback()))
         try await withReceiverCommand(optimistic: { $0?.isPlaying = false }, refreshAfter: false) { deviceID in
             try await self.api.pause(on: deviceID)
         }
     }
 
     func play() async throws {
+        DiagnosticLog.shared.record("command.play", DiagnosticLog.playback(currentPlayback()))
         cancelReceiverRecovery()
         let fallback = currentPlayback()
         try await serialized {
@@ -504,32 +532,38 @@ actor PlaybackCoordinator {
     }
 
     func next() async throws {
+        DiagnosticLog.shared.record("command.next", DiagnosticLog.playback(currentPlayback()))
         try await withReceiverCommand { deviceID in try await self.api.next(on: deviceID) }
     }
 
     func previous() async throws {
+        DiagnosticLog.shared.record("command.previous", DiagnosticLog.playback(currentPlayback()))
         try await withReceiverCommand { deviceID in try await self.api.previous(on: deviceID) }
     }
 
     func setShuffle(_ enabled: Bool) async throws {
+        DiagnosticLog.shared.record("command.setShuffle", ["enabled": String(enabled)])
         try await withReceiverCommand(optimistic: { $0?.shuffle = enabled }, refreshAfter: false) { deviceID in
             try await self.api.setShuffle(enabled, on: deviceID)
         }
     }
 
     func setRepeat(_ mode: RepeatMode) async throws {
+        DiagnosticLog.shared.record("command.setRepeat", ["mode": mode.rawValue])
         try await withReceiverCommand(optimistic: { $0?.repeatMode = mode }, refreshAfter: false) { deviceID in
             try await self.api.setRepeat(mode, on: deviceID)
         }
     }
 
     func addToQueue(uri: String) async throws {
+        DiagnosticLog.shared.record("command.addToQueue", ["uri": uri])
         try await withReceiverCommand(refreshAfter: false) { deviceID in
             try await self.api.addToQueue(uri: uri, on: deviceID)
         }
     }
 
     func seek(to milliseconds: Int, final: Bool = true) async throws {
+        DiagnosticLog.shared.record("command.seek", ["position_ms": String(milliseconds), "final": String(final)])
         let value = max(0, milliseconds)
         pendingSeekTask?.cancel()
         pendingSeekTask = nil
@@ -552,6 +586,7 @@ actor PlaybackCoordinator {
     }
 
     func setVolume(_ percent: Int, final: Bool = true) async throws {
+        DiagnosticLog.shared.record("command.setVolume", ["percent": String(percent), "final": String(final)])
         let value = min(100, max(0, percent))
         pendingVolumeTask?.cancel()
         pendingVolumeTask = nil
@@ -613,6 +648,7 @@ actor PlaybackCoordinator {
             await commandGate.release()
         } catch {
             await commandGate.release()
+            DiagnosticLog.shared.record("playback.error", ["error_type": String(describing: type(of: error)), "code": String((error as NSError).code)])
             eventBus.send(.commandFailed(Self.safeMessage(error)))
             throw error
         }
@@ -744,6 +780,7 @@ actor PlaybackCoordinator {
     }
 
     private func setPlayback(_ state: PlaybackState?) {
+        DiagnosticLog.shared.record("playback.applied", DiagnosticLog.playback(state))
         serverPlayback = state
         serverPlaybackTimestamp = clock.now
         eventBus.send(.stateChanged(state))
@@ -756,6 +793,7 @@ actor PlaybackCoordinator {
         }
 
         let position = min(max(0, snapshot.progressMS), track.durationMS)
+        DiagnosticLog.shared.record("recovery.restore", DiagnosticLog.playback(snapshot))
         let request = Self.restorationRequest(for: snapshot, positionMS: position)
         try await confirmingPlay(for: track.uri) {
             try await optimistically(updating: { playback in
@@ -819,6 +857,7 @@ actor PlaybackCoordinator {
             }
         }
 
+        DiagnosticLog.shared.record("recovery.started", DiagnosticLog.playback(snapshot))
         guard let track = snapshot.item else { return }
         let deadline = clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
         var delay = configuration.initialDiscoveryDelay
@@ -829,6 +868,7 @@ actor PlaybackCoordinator {
             }
             try await spotifyd.start()
         } catch {
+            DiagnosticLog.shared.record("playback.error", ["error_type": String(describing: type(of: error)), "code": String((error as NSError).code)])
             eventBus.send(.commandFailed(Self.safeMessage(error)))
             return
         }
@@ -842,12 +882,17 @@ actor PlaybackCoordinator {
             }
 
             do {
-                if let active = try await api.playbackState(),
-                   active.device?.name != receiverName {
+                let observed = try await api.playbackState()
+                try Task.checkCancellation()
+                if let active = observed,
+                   active.device?.name != receiverName || (active.isPlaying && active.device?.isActive == true) {
+                    // A reconnect may preserve playback by itself. Do not replay an older snapshot.
+                    DiagnosticLog.shared.record("recovery.already_active", DiagnosticLog.playback(active))
                     setPlayback(active)
                     return
                 }
 
+                try Task.checkCancellation()
                 let devices = try await api.devices()
                 if let device = devices.first(where: { $0.name == receiverName }),
                    let deviceID = device.id {
@@ -865,6 +910,7 @@ actor PlaybackCoordinator {
                         }
                         restored.progressMS = position
                     }
+                    DiagnosticLog.shared.record("recovery.restored", DiagnosticLog.playback(restored))
                     setPlayback(restored)
                     updateReceiver(recoveredDevice)
                     return
@@ -872,6 +918,7 @@ actor PlaybackCoordinator {
             } catch is CancellationError {
                 return
             } catch {
+                DiagnosticLog.shared.record("recovery.retry", ["error_type": String(describing: type(of: error))])
                 // The reconnecting receiver can be advertised before it accepts commands.
                 // Retry within the bounded recovery window.
             }
@@ -885,7 +932,11 @@ actor PlaybackCoordinator {
         }
     }
 
-    private func cancelReceiverRecovery() {
+    private func cancelReceiverRecovery(clearSnapshot: Bool = true) {
+        if clearSnapshot {
+            receiverRestartSnapshot = nil
+            receiverRestartDeadline = nil
+        }
         receiverRecoveryTask?.cancel()
         receiverRecoveryTask = nil
         receiverRecoveryIdentifier = nil
@@ -929,16 +980,23 @@ actor PlaybackCoordinator {
     }
 
     private func runReconciliationLoop() async {
-        while observationActivity != .hidden && !Task.isCancelled {
+        while !Task.isCancelled {
             do {
-                _ = try await refresh()
+                // Track changes continue while the window is hidden. Without these samples,
+                // reconnect recovery can replay a track from many songs ago.
+                if observationActivity == .active ||
+                    (serverPlayback?.isPlaying == true && serverPlayback?.device?.name == receiverName) {
+                    _ = try await refresh()
+                }
             } catch is CancellationError {
                 return
             } catch {
+                DiagnosticLog.shared.record("playback.error", ["error_type": String(describing: type(of: error)), "code": String((error as NSError).code)])
                 eventBus.send(.commandFailed(Self.safeMessage(error)))
             }
             do {
-                try await Task.sleep(for: configuration.activeRefreshInterval)
+                try await Task.sleep(for: observationActivity == .active
+                    ? configuration.activeRefreshInterval : configuration.backgroundRefreshInterval)
             } catch {
                 return
             }

@@ -15,7 +15,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 - A read-only queue popover showing the current track and upcoming tracks.
 - Native macOS media-key and Now Playing integration.
 - Immediate optimistic player updates after selecting a track.
-- Five-second playback reconciliation only while the app is active; progress is interpolated locally and polling stops while the app is hidden or backgrounded.
+- Five-second playback reconciliation while active, and fifteen-second reconciliation during local background playback so recovery retains a recent track. Idle background sessions do not poll. Progress is interpolated locally.
 - Startup restores Spotify's current session, or shows Spotify Lite's last known track as paused when no device has an active session. Account history is used only when the app has not remembered a track yet.
 - Lightweight, session-long supervision of one app-owned `spotifyd` child process with private configuration, automatic Connect-session recovery, bounded redacted logs, and graceful shutdown.
 
@@ -99,7 +99,10 @@ Navigation and playback actions are also available in the app's native menus. Th
 - Spotify Web API access and refresh tokens are stored in Keychain.
 - The public client ID, last displayed track, and non-secret preferences are stored in `UserDefaults`.
 - Generated configuration, `spotifyd` credentials/cache metadata, and bounded logs live under `~/Library/Application Support/SpotifyLite/`.
-- Audio-file caching is disabled so an interrupted download cannot poison a later playback session; each retained log file is bounded to approximately 512 KB.
+- Audio-file caching is disabled so an interrupted download cannot poison a later playback session.
+- `Logs/app.jsonl` records app lifecycle, media-key input, playback commands and positions, API paths/status/timing, recovery decisions, and redacted receiver output. Records have UTC timestamps, session IDs, and sequence numbers. It appends across launches and rotates at 4 MB with eight archives (about 36 MB total); writes run on a utility queue. Logs contain listening history, but omit request/response bodies, headers, tokens, and search queries.
+- `Logs/spotifyd.log` also retains receiver output, rotating at approximately 512 KB with one archive. Log directories/files use owner-only permissions.
+- To follow diagnostics: `tail -F ~/Library/"Application Support"/SpotifyLite/Logs/app.jsonl`. Closing the app stops recording; queued records flush on orderly quit. Logs survive ordinary process exits, but pending asynchronous records can be lost on a crash or power failure.
 - OAuth codes, tokens, PKCE values, callback parameters, and `spotifyd` credentials must never be committed or written to diagnostics.
 
 ## Project documentation

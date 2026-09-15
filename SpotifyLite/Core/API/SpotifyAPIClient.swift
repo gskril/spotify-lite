@@ -216,6 +216,7 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
     }
 
     func play(_ request: PlayRequest, on deviceID: String?) async throws {
+        DiagnosticLog.shared.record("api.play", ["request": String(describing: request), "device": deviceID ?? "none"])
         let body: Data?
         switch request {
         case .resume:
@@ -404,7 +405,26 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         while true {
             try Task.checkCancellation()
             let request = try makeRequest(endpoint, token: token)
-            let (data, response) = try await session.data(for: request)
+            let requestID = UUID().uuidString
+            let started = ContinuousClock.now
+            let fields = ["id": requestID, "method": endpoint.method,
+                          "path": request.url?.path ?? "unknown"]
+            DiagnosticLog.shared.record("api.request", fields)
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch {
+                DiagnosticLog.shared.record("api.transport_error", fields.merging([
+                    "code": String((error as NSError).code),
+                    "duration": String(describing: started.duration(to: .now))
+                ]) { _, new in new })
+                throw error
+            }
+            DiagnosticLog.shared.record("api.response", fields.merging([
+                "status": String((response as? HTTPURLResponse)?.statusCode ?? 0),
+                "duration": String(describing: started.duration(to: .now))
+            ]) { _, new in new })
             guard let http = response as? HTTPURLResponse else { throw SpotifyAPIError.invalidResponse }
 
             if http.statusCode == 401, !retriedUnauthorized {

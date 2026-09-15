@@ -163,6 +163,8 @@ struct RootView: View {
     }
 
     private func bootstrapIfPossible() async {
+        // The unit-test host must not authenticate the real account or launch a competing receiver.
+        guard !Bundle.allBundles.contains(where: { $0.bundleURL.pathExtension == "xctest" }) else { return }
         guard !didBootstrap else { return }
         didBootstrap = true
         guard premiumConfirmed, !clientID.isEmpty else { return }
@@ -183,6 +185,8 @@ struct RootView: View {
             guard !Task.isCancelled else { return }
             switch event {
             case .stateChanged(let state): environment.spotifydState = state
+            case .connectionWillRestart:
+                await environment.playbackCoordinator.receiverWillRestart()
             case .connectionInterrupted(let restartReceiver):
                 await environment.playbackCoordinator.receiverConnectionInterrupted(
                     restartReceiver: restartReceiver

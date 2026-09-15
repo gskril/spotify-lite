@@ -193,6 +193,7 @@ actor SpotifydSupervisor: SpotifydManaging {
             return
         }
 
+        DiagnosticLog.shared.record("receiver.stop_requested")
         stopWasRequested = true
         if running.process.isRunning {
             running.process.terminate()
@@ -272,6 +273,7 @@ actor SpotifydSupervisor: SpotifydManaging {
 
         do {
             try process.run()
+            DiagnosticLog.shared.record("receiver.started", ["pid": String(process.processIdentifier)])
         } catch {
             standardOutput.fileHandleForReading.readabilityHandler = nil
             standardError.fileHandleForReading.readabilityHandler = nil
@@ -333,6 +335,7 @@ actor SpotifydSupervisor: SpotifydManaging {
 
     private func appendLog(_ unsafeLine: String) {
         let line = Self.redact(unsafeLine)
+        DiagnosticLog.shared.record("receiver.log", ["message": line])
         logTail.append(line)
         if logTail.count > configuration.logTailLineLimit {
             logTail.removeFirst(logTail.count - configuration.logTailLineLimit)
@@ -344,7 +347,7 @@ actor SpotifydSupervisor: SpotifydManaging {
             if keepAliveRequested {
                 // Tell playback recovery to hold its current snapshot while the supervisor
                 // refreshes the stale Connect session in the background.
-                eventBus.send(.connectionInterrupted(restartReceiver: false))
+                eventBus.send(.connectionWillRestart)
                 scheduleKeepAliveRestart(forceRestart: true)
             } else {
                 eventBus.send(.connectionInterrupted(restartReceiver: true))
@@ -385,6 +388,7 @@ actor SpotifydSupervisor: SpotifydManaging {
 
     private func childDidExit(identifier: UUID, status: Int32) {
         guard let running = child, running.identifier == identifier else { return }
+        DiagnosticLog.shared.record("receiver.exited", ["status": String(status), "requested": String(stopWasRequested)])
         stopObservingDefaultAudioOutput()
         flushOutputBuffers(for: identifier)
         clearHandlers(on: running)
@@ -434,8 +438,8 @@ actor SpotifydSupervisor: SpotifydManaging {
 
         do {
             try await start()
-            // A recovery may have completed against the old registration before the forced
-            // restart. Re-notify it now that the replacement receiver is ready to be found.
+            // Playback held its pre-interruption snapshot while we stopped the old process.
+            // Only now may it discover the replacement and restore playback.
             if forceRestart {
                 eventBus.send(.connectionInterrupted(restartReceiver: false))
             }

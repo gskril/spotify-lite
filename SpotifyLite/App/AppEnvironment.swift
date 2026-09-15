@@ -113,6 +113,7 @@ final class AppEnvironment: ObservableObject {
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard event.keyCode == 49, modifiers.isEmpty, !event.isARepeat else { return event }
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+            DiagnosticLog.shared.record("input.space")
             Task { @MainActor [weak self] in self?.togglePlayback() }
             return nil
         }
@@ -120,6 +121,7 @@ final class AppEnvironment: ObservableObject {
 
     func installSystemMediaCommands() {
         systemMediaController.install { [weak self] command in
+            DiagnosticLog.shared.record("input.media_key", ["command": String(describing: command)])
             switch command {
             case .play: self?.play()
             case .pause: self?.pause()
