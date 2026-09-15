@@ -139,13 +139,8 @@ final class AppEnvironment: ObservableObject {
     }
 
     func play() {
-        guard playback?.isPlaying != true else { return }
-        if playback?.item != nil, playback?.device == nil {
-            runStartingPlayback { coordinator in try await coordinator.play() }
-            return
-        }
-        playback?.isPlaying = true
-        runPlaybackCommand { coordinator, _ in try await coordinator.play() }
+        guard playback?.isPlaying != true, !isStartingPlayback else { return }
+        runStartingPlayback { coordinator in try await coordinator.play() }
     }
 
     func pause() {

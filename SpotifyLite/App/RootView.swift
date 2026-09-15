@@ -194,7 +194,7 @@ struct RootView: View {
             case .exited(let status):
                 if status == 0 { environment.spotifydState = .stopped }
                 else { environment.spotifydState = .crashed(status: status) }
-            case .log: break
+            case .log(let line): await environment.playbackCoordinator.receiverLog(line)
             }
         }
     }

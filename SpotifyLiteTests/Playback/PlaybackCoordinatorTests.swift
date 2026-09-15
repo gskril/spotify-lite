@@ -3,6 +3,75 @@ import XCTest
 @testable import SpotifyLite
 
 final class PlaybackCoordinatorTests: XCTestCase {
+    func testConcurrentPlayRequestsStartOnlyOnce() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let paused = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
+            progressMS: 23_663, isPlaying: false, device: device,
+            shuffle: false, repeatMode: .off, contextURI: "spotify:playlist:changed")
+        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [paused, nil],
+            operationDelay: .milliseconds(100))
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
+        _ = try await coordinator.refresh()
+        let first = Task { try await coordinator.play() }
+        try await waitForAPICall(api, prefix: "play:")
+        try await coordinator.play()
+        try await first.value
+        let calls = await api.calls
+        XCTAssertEqual(calls.filter { $0.hasPrefix("play:") }.count, 1)
+    }
+
+    func testMissingPlaylistOffsetRestoresExactTrackOnce() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let paused = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
+            progressMS: 23_663, isPlaying: false, device: device,
+            shuffle: false, repeatMode: .off, contextURI: "spotify:playlist:changed")
+        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [paused, nil],
+            operationDelay: .milliseconds(50))
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
+        _ = try await coordinator.refresh()
+        let first = Task { try await coordinator.play() }
+        try await waitForAPICall(api, prefix: "play:")
+        let warning = "Failed to resolve index by Some(Uri(\"spotify:track:saved\")), using fallback index: None (Error: could not find track None in context of 50)"
+        await coordinator.receiverLog(warning)
+        try await first.value
+        await coordinator.receiverLog(warning)
+        let calls = await api.calls
+        XCTAssertEqual(calls.filter { $0.hasPrefix("play:") }, [
+            "play:local:context(spotify:playlist:changed)@23663",
+            "play:local:uris(spotify:track:saved)@23663"
+        ])
+        let restored = await coordinator.currentPlayback()
+        XCTAssertEqual(restored?.item?.uri, "spotify:track:saved")
+        XCTAssertNil(restored?.contextURI)
+    }
+
+    func testMissingOffsetWarningAfterPauseDoesNotRestartPlayback() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let paused = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
+            progressMS: 23_663, isPlaying: false, device: device,
+            shuffle: false, repeatMode: .off, contextURI: "spotify:playlist:changed")
+        let api = PlaybackAPISpy(deviceResponses: [[device], [device]], playbackResponses: [paused, nil])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
+        _ = try await coordinator.refresh()
+        try await coordinator.play()
+        try await coordinator.pause()
+        await coordinator.receiverLog("Failed to resolve index by Some(Uri(\"spotify:track:saved\")), using fallback index: None (Error: could not find track None in context of 50)")
+        let calls = await api.calls
+        XCTAssertEqual(calls.filter { $0.hasPrefix("play:") }.count, 1)
+        let state = await coordinator.currentPlayback()
+        XCTAssertEqual(state?.isPlaying, false)
+    }
+
+    func testContextOffsetParserIgnoresPreloadingAndOtherTracks() {
+        XCTAssertNil(PlaybackCoordinator.unresolvedContextTrack(in: "Loading spotify:track:saved"))
+        XCTAssertNil(PlaybackCoordinator.unresolvedContextTrack(in: "could not find track"))
+        XCTAssertNil(PlaybackCoordinator.unresolvedContextTrack(in:
+            "Failed to resolve index by Some(Uri(\"spotify:album:saved\")): could not find track"))
+    }
+
     func testPausePreservesElapsedPositionBetweenPolls() async throws {
         let device = makeDevice(id: "local", active: true)
         let initial = PlaybackState(item: makeTrack(id: "playing", name: "Playing"),
