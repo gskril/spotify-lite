@@ -659,6 +659,10 @@ actor PlaybackCoordinator {
         operation: () async throws -> Void
     ) async throws {
         let original = serverPlayback
+        let originalTimestamp = serverPlaybackTimestamp
+        // Materialize elapsed playback before resetting the interpolation clock. Otherwise
+        // pause, shuffle, volume, or transfer rewinds to the last poll's position.
+        serverPlayback = currentPlayback()
         mutation(&serverPlayback)
         serverPlaybackTimestamp = clock.now
         eventBus.send(.stateChanged(serverPlayback))
@@ -666,8 +670,8 @@ actor PlaybackCoordinator {
             try await operation()
         } catch {
             serverPlayback = original
-            serverPlaybackTimestamp = clock.now
-            eventBus.send(.stateChanged(original))
+            serverPlaybackTimestamp = originalTimestamp
+            eventBus.send(.stateChanged(currentPlayback()))
             throw error
         }
     }

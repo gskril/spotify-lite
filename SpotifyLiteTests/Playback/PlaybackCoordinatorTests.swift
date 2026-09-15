@@ -3,6 +3,44 @@ import XCTest
 @testable import SpotifyLite
 
 final class PlaybackCoordinatorTests: XCTestCase {
+    func testPausePreservesElapsedPositionBetweenPolls() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let initial = PlaybackState(item: makeTrack(id: "playing", name: "Playing"),
+                                    progressMS: 20_000, isPlaying: true, device: device,
+                                    shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [initial])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
+        _ = try await coordinator.refresh()
+        try await Task.sleep(for: .milliseconds(60))
+        let beforePause = await coordinator.currentPlayback()
+        try await coordinator.pause()
+        let paused = await coordinator.currentPlayback()
+        XCTAssertGreaterThan(beforePause?.progressMS ?? 0, initial.progressMS)
+        XCTAssertGreaterThanOrEqual(paused?.progressMS ?? 0, beforePause?.progressMS ?? 0)
+        XCTAssertEqual(paused?.isPlaying, false)
+        try await Task.sleep(for: .milliseconds(20))
+        let later = await coordinator.currentPlayback()
+        XCTAssertEqual(later?.progressMS, paused?.progressMS)
+    }
+
+    func testShuffleDoesNotRewindInterpolatedPlayback() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let initial = PlaybackState(item: makeTrack(id: "playing", name: "Playing"),
+                                    progressMS: 20_000, isPlaying: true, device: device,
+                                    shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [initial])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        _ = try await coordinator.refresh()
+        try await Task.sleep(for: .milliseconds(60))
+        let beforeShuffle = await coordinator.currentPlayback()
+        try await coordinator.setShuffle(true)
+        let afterShuffle = await coordinator.currentPlayback()
+        XCTAssertGreaterThan(beforeShuffle?.progressMS ?? 0, initial.progressMS)
+        XCTAssertGreaterThanOrEqual(afterShuffle?.progressMS ?? 0, beforeShuffle?.progressMS ?? 0)
+        XCTAssertTrue(afterShuffle?.shuffle == true)
+    }
+
     func testStartupHydratesPausedPlayerFromMostRecentTrackWhenAccountIsIdle() async throws {
         let recent = makeTrack(id: "recent", name: "Last played")
         let api = PlaybackAPISpy(
