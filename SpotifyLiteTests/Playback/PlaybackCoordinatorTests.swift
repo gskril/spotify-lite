@@ -3,6 +3,44 @@ import XCTest
 @testable import SpotifyLite
 
 final class PlaybackCoordinatorTests: XCTestCase {
+    func testPauseWhileReceiverDisappearsKeepsPausedState() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let playing = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
+            progressMS: 23_663, isPlaying: true, device: device,
+            shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [[]], playbackResponses: [playing])
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
+        _ = try await coordinator.refresh()
+        await coordinator.receiverWillRestart()
+        try await coordinator.pause()
+        let state = await coordinator.currentPlayback()
+        XCTAssertEqual(state?.isPlaying, false)
+        let calls = await api.calls
+        XCTAssertFalse(calls.contains { $0.hasPrefix("play:") })
+    }
+
+    func testPause404DuringRestartDoesNotRestorePlayingSnapshot() async throws {
+        let device = makeDevice(id: "local", active: true)
+        let playing = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
+            progressMS: 23_663, isPlaying: true, device: device,
+            shuffle: false, repeatMode: .off)
+        let api = PlaybackAPISpy(deviceResponses: [[device], [device]], playbackResponses: [playing, nil],
+            operationDelay: .milliseconds(100), pauseError: .http(status: 404, reason: nil, message: "No active device"))
+        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
+        _ = try await coordinator.refresh()
+        let pause = Task { try await coordinator.pause() }
+        try await waitForAPICall(api, prefix: "pause:")
+        await coordinator.receiverWillRestart()
+        await coordinator.receiverConnectionInterrupted()
+        try await pause.value
+        let state = await coordinator.currentPlayback()
+        XCTAssertEqual(state?.isPlaying, false)
+        let calls = await api.calls
+        XCTAssertFalse(calls.contains { $0.hasPrefix("play:") })
+    }
+
     func testConcurrentPlayRequestsStartOnlyOnce() async throws {
         let device = makeDevice(id: "local", active: true)
         let paused = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
@@ -1022,6 +1060,7 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     private var deviceResponses: [[SpotifyDevice]]
     private var playbackResponses: [PlaybackState?]
     private let operationDelay: Duration
+    private let pauseError: SpotifyAPIError?
     private let recentlyPlayedTracks: [SpotifyTrack]
     private(set) var calls: [String] = []
     private(set) var activeOperations = 0
@@ -1031,12 +1070,14 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
         deviceResponses: [[SpotifyDevice]],
         playbackResponses: [PlaybackState?] = [],
         recentlyPlayedTracks: [SpotifyTrack] = [],
-        operationDelay: Duration = .zero
+        operationDelay: Duration = .zero,
+        pauseError: SpotifyAPIError? = nil
     ) {
         self.deviceResponses = deviceResponses
         self.playbackResponses = playbackResponses
         self.recentlyPlayedTracks = recentlyPlayedTracks
         self.operationDelay = operationDelay
+        self.pauseError = pauseError
     }
 
     func currentUser() async throws -> SpotifyUser { throw PlaceholderError.notConfigured }
@@ -1072,7 +1113,10 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
         await recordOperation("play:\(deviceID ?? "nil"):\(describe(request))")
     }
 
-    func pause(on deviceID: String?) async throws { await recordOperation("pause:\(deviceID ?? "nil")") }
+    func pause(on deviceID: String?) async throws {
+        await recordOperation("pause:\(deviceID ?? "nil")")
+        if let pauseError { throw pauseError }
+    }
     func next(on deviceID: String?) async throws { await recordOperation("next:\(deviceID ?? "nil")") }
     func previous(on deviceID: String?) async throws { await recordOperation("previous:\(deviceID ?? "nil")") }
     func seek(to milliseconds: Int, on deviceID: String?) async throws { await recordOperation("seek:\(milliseconds):\(deviceID ?? "nil")") }

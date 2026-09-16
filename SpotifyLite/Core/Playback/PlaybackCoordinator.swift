@@ -460,8 +460,43 @@ actor PlaybackCoordinator {
 
     func pause() async throws {
         DiagnosticLog.shared.record("command.pause", DiagnosticLog.playback(currentPlayback()))
-        try await withReceiverCommand(optimistic: { $0?.isPlaying = false }, refreshAfter: false) { deviceID in
-            try await self.api.pause(on: deviceID)
+        let isLocal = currentPlayback()?.device?.name == receiverName
+        // Record local pause intent before waiting for an in-flight Play. A receiver
+        // restart during that wait must not capture a playing recovery snapshot.
+        if isLocal {
+            var paused = currentPlayback()
+            paused?.isPlaying = false
+            setPlayback(paused)
+        }
+        cancelReceiverRecovery()
+        try await serialized {
+            self.cancelReceiverRecovery()
+            do {
+                let device = try await self.resolveCommandDevice()
+                guard let deviceID = device.id else {
+                    throw PlaybackCoordinatorError.receiverHasNoDeviceID(name: self.receiverName)
+                }
+                try await self.optimistically(updating: { $0?.isPlaying = false }) {
+                    try await self.api.pause(on: deviceID)
+                }
+            } catch {
+                // A restarted local receiver has no active session left to pause.
+                // Keep the user's paused state instead of rolling back to Playing.
+                let receiverUnavailable: Bool
+                if case PlaybackCoordinatorError.activeDeviceNotFound = error {
+                    receiverUnavailable = true
+                } else if case SpotifyAPIError.http(status: 404, reason: _, message: _) = error {
+                    receiverUnavailable = true
+                } else {
+                    receiverUnavailable = false
+                }
+                guard isLocal && receiverUnavailable else { throw error }
+                self.cancelReceiverRecovery()
+                var paused = self.currentPlayback()
+                paused?.isPlaying = false
+                self.setPlayback(paused)
+                DiagnosticLog.shared.record("command.pause_receiver_unavailable")
+            }
         }
     }
 
