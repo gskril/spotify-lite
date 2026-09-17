@@ -262,7 +262,8 @@ actor PlaybackCoordinator {
             await self?.runReceiverRecovery(
                 snapshot: snapshot,
                 identifier: identifier,
-                restartReceiver: restartReceiver
+                restartReceiver: restartReceiver,
+                receiverWasRestarted: saved != nil || restartReceiver
             )
         }
     }
@@ -947,7 +948,8 @@ actor PlaybackCoordinator {
     private func runReceiverRecovery(
         snapshot: PlaybackState,
         identifier: UUID,
-        restartReceiver: Bool
+        restartReceiver: Bool,
+        receiverWasRestarted: Bool
     ) async {
         defer {
             if receiverRecoveryIdentifier == identifier {
@@ -984,8 +986,11 @@ actor PlaybackCoordinator {
                 let observed = try await api.playbackState()
                 try Task.checkCancellation()
                 if let active = observed,
-                   active.device?.name != receiverName || (active.isPlaying && active.device?.isActive == true) {
-                    // A reconnect may preserve playback by itself. Do not replay an older snapshot.
+                   active.device?.name != receiverName ||
+                    (!receiverWasRestarted && active.isPlaying && active.device?.isActive == true) {
+                    // A reconnect may preserve playback only when the process survives. After
+                    // replacement, Spotify can still report the dead process as playing.
+                    // Always respect playback on another device, even after a restart.
                     DiagnosticLog.shared.record("recovery.already_active", DiagnosticLog.playback(active))
                     setPlayback(active)
                     return
