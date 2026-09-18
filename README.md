@@ -92,6 +92,7 @@ Navigation and playback actions are also available in the app's native menus. Th
 - Podcasts, audiobooks, local files, offline downloads, lyrics, playlist editing, and Spotify's private Home recommendation feed are out of scope.
 - Albums are browsable from Library and Search, but selecting an album currently starts its context rather than opening an album-track detail screen.
 - `spotifyd` is an unofficial GPL-3.0 client based on the reverse-engineered `librespot` protocol. Spotify changes can break local playback.
+- Known receiver connection losses can briefly interrupt playback while automatic recovery restores it. See the [incident and upstream tracking notes](docs/playback-interruption-2026-09-17.md#known-issue-and-upstream-tracking). Use released spotifyd updates when an applicable fix becomes available; no local receiver patch is planned.
 - A formal long-duration playback, crash-recovery, and multi-output-device release matrix is still outstanding.
 
 ## Privacy and storage
