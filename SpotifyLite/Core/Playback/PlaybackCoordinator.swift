@@ -213,6 +213,21 @@ actor PlaybackCoordinator {
         return state
     }
 
+    /// Applies a receiver supervisor event to playback. See `SpotifydEvent` for the ordering
+    /// the supervisor guarantees around restarts.
+    func handleReceiverEvent(_ event: SpotifydEvent) async {
+        switch event {
+        case .connectionWillRestart:
+            receiverWillRestart()
+        case .connectionInterrupted(let restartReceiver):
+            receiverConnectionInterrupted(restartReceiver: restartReceiver)
+        case .log(let line):
+            await receiverLog(line)
+        case .stateChanged, .exited:
+            break
+        }
+    }
+
     /// spotifyd can keep running after its Spotify transport closes, or exit without preserving
     /// its playing context. Refresh the receiver session and retain the exact track and position
     /// that were authoritative immediately before the interruption.

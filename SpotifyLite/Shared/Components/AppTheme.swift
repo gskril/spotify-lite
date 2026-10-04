@@ -18,3 +18,15 @@ extension View {
     }
 }
 
+
+extension SpotifydState {
+    /// The status dot colour used wherever the receiver state is shown.
+    var indicatorColor: Color {
+        switch self {
+        case .running: AppTheme.accent
+        case .starting: .orange
+        case .crashed: .red
+        default: .secondary
+        }
+    }
+}

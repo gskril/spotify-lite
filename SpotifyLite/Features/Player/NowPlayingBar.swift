@@ -5,7 +5,6 @@ struct NowPlayingBar: View {
     @State private var showingPlayer = false
     @State private var showingDevices = false
     @State private var showingQueue = false
-    @State private var isSendingCommand = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,17 +69,17 @@ struct NowPlayingBar: View {
 
     private var playbackControls: some View {
         HStack(spacing: 17) {
-            Button { previous() } label: { Image(systemName: "backward.fill") }
-                .disabled(track == nil || isSendingCommand || environment.isStartingPlayback)
+            Button { environment.skipPrevious() } label: { Image(systemName: "backward.fill") }
+                .disabled(track == nil || environment.isStartingPlayback)
                 .help("Previous")
-            Button { togglePlayback() } label: {
+            Button { environment.togglePlayback() } label: {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(size: 31))
             }
-            .disabled(isSendingCommand || environment.isStartingPlayback)
+            .disabled(environment.isStartingPlayback)
             .help(isPlaying ? "Pause (Space)" : "Play (Space)")
-            Button { next() } label: { Image(systemName: "forward.fill") }
-                .disabled(track == nil || isSendingCommand || environment.isStartingPlayback)
+            Button { environment.skipNext() } label: { Image(systemName: "forward.fill") }
+                .disabled(track == nil || environment.isStartingPlayback)
                 .help("Next")
         }
         .buttonStyle(.plain)
@@ -145,31 +144,6 @@ struct NowPlayingBar: View {
         if environment.isStartingPlayback { return "Connecting to this Mac…" }
         return receiverReady ? "Choose something to play" : "Start the local receiver in Settings"
     }
-
-    private func command(_ action: @escaping @Sendable () async throws -> Void) {
-        isSendingCommand = true
-        Task {
-            do { try await action() }
-            catch { environment.report(error) }
-            environment.playback = await environment.playbackCoordinator.currentPlayback()
-            isSendingCommand = false
-        }
-    }
-
-    private func togglePlayback() {
-        environment.togglePlayback()
-    }
-
-    private func previous() {
-        let coordinator = environment.playbackCoordinator
-        command { try await coordinator.previous() }
-    }
-
-    private func next() {
-        let coordinator = environment.playbackCoordinator
-        command { try await coordinator.next() }
-    }
-
 }
 
 private struct QueueView: View {
@@ -433,8 +407,7 @@ private struct DevicePickerView: View {
         errorMessage = nil
         Task {
             do {
-                try await environment.playbackCoordinator.transferPlayback(to: device)
-                environment.playback = await environment.playbackCoordinator.currentPlayback()
+                try await environment.transferPlayback(to: device)
                 isPresented = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -447,7 +420,7 @@ private struct DevicePickerView: View {
         if showLoading { isLoading = true }
         errorMessage = nil
         do {
-            devices = try await environment.playbackCoordinator.availableDevices()
+            devices = try await environment.availableDevices()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -494,17 +467,17 @@ struct ExpandedPlayerView: View {
                 PlayerProgressTrack(environment: environment, showsTimes: true)
             }
             HStack(spacing: 28) {
-                Button { toggleShuffle() } label: { Image(systemName: environment.playback?.shuffle == true ? "shuffle.circle.fill" : "shuffle") }
-                Button { run { try await environment.playbackCoordinator.previous() } } label: { Image(systemName: "backward.fill") }
-                Button { togglePlayback() } label: { Image(systemName: environment.playback?.isPlaying == true ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 42)) }
-                Button { run { try await environment.playbackCoordinator.next() } } label: { Image(systemName: "forward.fill") }
-                Button { cycleRepeat() } label: { Image(systemName: repeatSymbol) }
+                Button { environment.setShuffle(environment.playback?.shuffle != true) } label: { Image(systemName: environment.playback?.shuffle == true ? "shuffle.circle.fill" : "shuffle") }
+                Button { environment.skipPrevious() } label: { Image(systemName: "backward.fill") }
+                Button { environment.togglePlayback() } label: { Image(systemName: environment.playback?.isPlaying == true ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 42)) }
+                Button { environment.skipNext() } label: { Image(systemName: "forward.fill") }
+                Button { environment.cycleRepeat() } label: { Image(systemName: repeatSymbol) }
             }
             .buttonStyle(.plain)
             .font(.title3)
             HStack {
                 Image(systemName: "speaker.fill")
-                Slider(value: $volume, in: 0...100) { editing in if !editing { setVolume() } }
+                Slider(value: $volume, in: 0...100) { editing in if !editing { environment.setVolume(Int(volume)) } }
                 Image(systemName: "speaker.wave.3.fill")
             }
             .foregroundStyle(.secondary)
@@ -523,26 +496,6 @@ struct ExpandedPlayerView: View {
         case .off: "repeat"
         case .context: "repeat.circle.fill"
         case .track: "repeat.1.circle.fill"
-        }
-    }
-
-    private func togglePlayback() {
-        environment.togglePlayback()
-    }
-    private func setVolume() { run { try await environment.playbackCoordinator.setVolume(Int(volume)) } }
-    private func toggleShuffle() { run { try await environment.playbackCoordinator.setShuffle(environment.playback?.shuffle != true) } }
-    private func cycleRepeat() {
-        let current = environment.playback?.repeatMode ?? .off
-        let next: RepeatMode = current == .off ? .context : (current == .context ? .track : .off)
-        run { try await environment.playbackCoordinator.setRepeat(next) }
-    }
-
-    private func run(_ action: @escaping () async throws -> Void) {
-        Task {
-            do {
-                try await action()
-                environment.playback = await environment.playbackCoordinator.currentPlayback()
-            } catch { environment.report(error) }
         }
     }
 }
@@ -604,13 +557,8 @@ private struct PlayerProgressTrack: View {
         guard !editing else { return }
         let target = Int(displayedProgress)
         Task {
-            do {
-                try await environment.playbackCoordinator.seek(to: target)
-                environment.playback = await environment.playbackCoordinator.currentPlayback()
-            } catch {
-                environment.report(error)
-                syncToPlayback()
-            }
+            await environment.seek(to: target)
+            syncToPlayback()
         }
     }
 }

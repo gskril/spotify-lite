@@ -318,16 +318,12 @@ struct HomeView: View {
     }
 
     private func startReceiver() {
-        environment.spotifydState = .starting
         Task {
-            do { try await environment.spotifyd.start() }
+            do { try await environment.startReceiver() }
             catch SpotifydSupervisorError.authenticationRequired {
-                environment.spotifydState = .needsAuthentication
+                // The receiver card already prompts for authentication.
             }
-            catch {
-                environment.spotifydState = .crashed(status: -1)
-                environment.report(error)
-            }
+            catch { environment.report(error) }
         }
     }
 }

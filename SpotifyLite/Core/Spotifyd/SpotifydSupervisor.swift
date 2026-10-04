@@ -144,7 +144,12 @@ actor SpotifydSupervisor: SpotifydManaging {
         }
 
         let executable = try await requireExecutable()
-        try prepareApplicationSupport()
+        do {
+            try prepareApplicationSupport()
+        } catch {
+            eventBus.send(.stateChanged(.crashed(status: -1)))
+            throw error
+        }
         guard credentialsLikelyExist() else {
             eventBus.send(.stateChanged(.needsAuthentication))
             throw SpotifydSupervisorError.authenticationRequired

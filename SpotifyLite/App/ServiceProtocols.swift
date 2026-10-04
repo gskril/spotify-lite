@@ -41,11 +41,19 @@ extension SpotifyAPIProviding {
     }
 }
 
+/// Events from the receiver supervisor. The supervisor is the only source of `SpotifydState`:
+/// it sends `.stateChanged` for every transition, including failures thrown from `start()`.
+///
+/// Recovery ordering: before the supervisor replaces a stale receiver it sends
+/// `.connectionWillRestart`, so playback holds its snapshot. Once the replacement is running
+/// it sends `.connectionInterrupted(restartReceiver: false)`, and only then does playback
+/// rediscover the receiver and restore.
 enum SpotifydEvent: Sendable, Equatable {
     case stateChanged(SpotifydState)
     case log(String)
     case connectionWillRestart
     case connectionInterrupted(restartReceiver: Bool = false)
+    /// Informational. A `.stateChanged` with the resulting state always follows.
     case exited(status: Int32)
 }
 
