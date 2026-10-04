@@ -73,7 +73,7 @@ private actor PlaybackCommandGate {
 actor PlaybackCoordinator {
     /// A track the user chose that Spotify's eventually consistent playback state has not
     /// confirmed yet. Until the deadline, polls that disagree with it are held back.
-    private struct PendingTrack {
+    struct PendingTrack: Sendable, Equatable {
         let uri: String
         let deadline: ContinuousClock.Instant
     }
@@ -91,10 +91,7 @@ actor PlaybackCoordinator {
     private var receiver: SpotifyDevice?
     private var observationActivity: PlaybackObservationActivity = .hidden
     private var reconciliationTask: Task<Void, Never>?
-    private var receiverRecoveryTask: Task<Void, Never>?
-    private var receiverRecoveryIdentifier: UUID?
-    private var receiverRestartSnapshot: PlaybackState?
-    private var receiverRestartDeadline: ContinuousClock.Instant?
+    private var recovery: ReceiverRecovery = .idle
     private var pendingSeekTask: Task<Void, Never>?
     private var pendingVolumeTask: Task<Void, Never>?
     private var isPlayRequestInFlight = false
@@ -117,7 +114,7 @@ actor PlaybackCoordinator {
 
     deinit {
         reconciliationTask?.cancel()
-        receiverRecoveryTask?.cancel()
+        recovery.task?.cancel()
         pendingSeekTask?.cancel()
         pendingVolumeTask?.cancel()
     }
@@ -176,41 +173,87 @@ actor PlaybackCoordinator {
     func refresh() async throws -> PlaybackState? {
         let state = try await api.playbackState()
         DiagnosticLog.shared.record("playback.observed", DiagnosticLog.playback(state))
-        if receiverRestartSnapshot != nil {
-            if let receiverRestartDeadline, clock.now < receiverRestartDeadline { return currentPlayback() }
+        let decision = Self.reconcile(
+            observed: state,
+            held: serverPlayback,
+            restartDeadline: recovery.restartDeadline,
+            pending: pendingSelectedTrack,
+            recovering: recovery.isRecovering,
+            now: clock.now
+        )
+        if decision.restartTimedOut {
             DiagnosticLog.shared.record("recovery.restart_timeout")
-            receiverRestartSnapshot = nil
-            receiverRestartDeadline = nil
+            recovery = .idle
         }
-        if let pending = pendingSelectedTrack {
-            let confirmed = state?.item?.uri == pending.uri && state?.isPlaying == true
-            if !confirmed, clock.now < pending.deadline {
-                return currentPlayback()
-            }
+        if decision.clearsPendingTrack {
             pendingSelectedTrack = nil
             pendingRestoration = nil
         }
+        switch decision.outcome {
+        case .hold:
+            return currentPlayback()
+        case .holdPlaying:
+            let heldPlayback = currentPlayback()
+            setPlayback(heldPlayback)
+            return heldPlayback
+        case .markPaused(let paused):
+            setPlayback(paused)
+            return paused
+        case .apply(let observed):
+            setPlayback(observed)
+            if let device = observed?.device, device.name == receiverName {
+                updateReceiver(device)
+            }
+            return observed
+        }
+    }
+
+    /// Decides how an observed Spotify playback state is reconciled with the state the
+    /// coordinator is holding. Pure, so every branch can be tested without timing.
+    ///
+    /// - Parameters:
+    ///   - observed: the state Spotify just reported (`nil` for a 204 response).
+    ///   - held: the coordinator's last applied state, without interpolation.
+    ///   - restartDeadline: when the coordinator is waiting for a receiver restart, the
+    ///     time until which the held state is kept regardless of what Spotify reports.
+    ///   - pending: a selected track that Spotify has not yet confirmed as playing.
+    ///   - recovering: whether receiver recovery is running.
+    nonisolated static func reconcile(
+        observed: PlaybackState?,
+        held: PlaybackState?,
+        restartDeadline: ContinuousClock.Instant?,
+        pending: PendingTrack?,
+        recovering: Bool,
+        now: ContinuousClock.Instant
+    ) -> ReconcileDecision {
+        var decision = ReconcileDecision(outcome: .apply(observed))
+        if let restartDeadline {
+            if now < restartDeadline {
+                decision.outcome = .hold
+                return decision
+            }
+            decision.restartTimedOut = true
+        }
+        if let pending {
+            let confirmed = observed?.item?.uri == pending.uri && observed?.isPlaying == true
+            if !confirmed, now < pending.deadline {
+                decision.outcome = .hold
+                return decision
+            }
+            decision.clearsPendingTrack = true
+        }
+        guard observed == nil else { return decision }
         // spotifyd briefly disappears from Spotify Connect while its session reconnects. Keep
         // the last authoritative playing state during recovery instead of converting one 204
         // response into a paused, device-less player.
-        if state == nil,
-           receiverRecoveryTask != nil,
-           serverPlayback?.isPlaying == true,
-           let heldPlayback = currentPlayback() {
-            setPlayback(heldPlayback)
-            return heldPlayback
-        }
-        if state == nil, var remembered = serverPlayback, remembered.item != nil {
+        if recovering, held?.isPlaying == true {
+            decision.outcome = .holdPlaying
+        } else if var remembered = held, remembered.item != nil {
             remembered.isPlaying = false
             remembered.device?.isActive = false
-            setPlayback(remembered)
-            return remembered
+            decision.outcome = .markPaused(remembered)
         }
-        setPlayback(state)
-        if let device = state?.device, device.name == receiverName {
-            updateReceiver(device)
-        }
-        return state
+        return decision
     }
 
     /// Applies a receiver supervisor event to playback. See `SpotifydEvent` for the ordering
@@ -232,19 +275,29 @@ actor PlaybackCoordinator {
     /// its playing context. Refresh the receiver session and retain the exact track and position
     /// that were authoritative immediately before the interruption.
     func receiverWillRestart() {
-        guard receiverRestartSnapshot == nil else { return }
-        receiverRestartSnapshot = currentPlayback()
-        receiverRestartDeadline = clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
-        cancelReceiverRecovery(clearSnapshot: false)
-        DiagnosticLog.shared.record("recovery.waiting_for_restart", DiagnosticLog.playback(receiverRestartSnapshot))
+        if case .awaitingRestart = recovery { return }
+        let snapshot = currentPlayback()
+        recovery.task?.cancel()
+        // Without a snapshot there is nothing to hold, so the restart wait is a no-op.
+        if let snapshot {
+            recovery = .awaitingRestart(
+                snapshot: snapshot,
+                deadline: clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
+            )
+        } else {
+            recovery = .idle
+        }
+        DiagnosticLog.shared.record("recovery.waiting_for_restart", DiagnosticLog.playback(snapshot))
     }
 
     func receiverConnectionInterrupted(restartReceiver: Bool = false) {
-        let saved = receiverRestartSnapshot
-        receiverRestartSnapshot = nil
-        receiverRestartDeadline = nil
+        var saved: PlaybackState?
+        if case .awaitingRestart(let snapshot, _) = recovery {
+            saved = snapshot
+            recovery = .idle
+        }
         DiagnosticLog.shared.record("recovery.interrupted", ["restart": String(restartReceiver)])
-        guard receiverRecoveryTask == nil,
+        guard !recovery.isRecovering,
               let snapshot = saved ?? currentPlayback(),
               snapshot.device?.name == receiverName,
               snapshot.item != nil else {
@@ -252,8 +305,7 @@ actor PlaybackCoordinator {
         }
 
         let identifier = UUID()
-        receiverRecoveryIdentifier = identifier
-        receiverRecoveryTask = Task { [weak self] in
+        let task: Task<Void, Never> = Task { [weak self] in
             await self?.runReceiverRecovery(
                 snapshot: snapshot,
                 identifier: identifier,
@@ -261,6 +313,7 @@ actor PlaybackCoordinator {
                 receiverWasRestarted: saved != nil || restartReceiver
             )
         }
+        recovery = .recovering(id: identifier, task: task)
     }
 
     func setObservationActivity(_ activity: PlaybackObservationActivity) {
@@ -930,9 +983,8 @@ actor PlaybackCoordinator {
         receiverWasRestarted: Bool
     ) async {
         defer {
-            if receiverRecoveryIdentifier == identifier {
-                receiverRecoveryTask = nil
-                receiverRecoveryIdentifier = nil
+            if recovery.isCurrentRun(identifier) {
+                recovery = .idle
             }
         }
 
@@ -953,7 +1005,7 @@ actor PlaybackCoordinator {
 
         while clock.now < deadline {
             guard !Task.isCancelled,
-                  receiverRecoveryIdentifier == identifier,
+                  recovery.isCurrentRun(identifier),
                   serverPlayback?.isPlaying == snapshot.isPlaying,
                   serverPlayback?.item?.uri == track.uri else {
                 return
@@ -985,7 +1037,7 @@ actor PlaybackCoordinator {
                     if snapshot.isPlaying {
                         try await serialized {
                             try Task.checkCancellation()
-                            guard self.receiverRecoveryIdentifier == identifier else { throw CancellationError() }
+                            guard self.recovery.isCurrentRun(identifier) else { throw CancellationError() }
                             try await self.restore(snapshot, on: device)
                         }
                         DiagnosticLog.shared.record("recovery.restored", DiagnosticLog.playback(currentPlayback()))
@@ -1013,15 +1065,10 @@ actor PlaybackCoordinator {
         }
     }
 
-    private func cancelReceiverRecovery(clearSnapshot: Bool = true) {
-        if clearSnapshot {
-            pendingRestoration = nil
-            receiverRestartSnapshot = nil
-            receiverRestartDeadline = nil
-        }
-        receiverRecoveryTask?.cancel()
-        receiverRecoveryTask = nil
-        receiverRecoveryIdentifier = nil
+    private func cancelReceiverRecovery() {
+        pendingRestoration = nil
+        recovery.task?.cancel()
+        recovery = .idle
     }
 
     private func updateReceiver(_ device: SpotifyDevice) {
@@ -1072,6 +1119,53 @@ actor PlaybackCoordinator {
 
     private static func safeMessage(_ error: Error) -> String {
         String((error as NSError).localizedDescription.prefix(512))
+    }
+}
+
+extension PlaybackCoordinator {
+    struct ReconcileDecision: Sendable, Equatable {
+        enum Outcome: Sendable, Equatable {
+            /// Keep the held state untouched and ignore the observation.
+            case hold
+            /// Spotify reported nothing while recovery runs: re-apply the held playing state.
+            case holdPlaying
+            /// Spotify reported nothing: keep the held track, but paused on an inactive device.
+            case markPaused(PlaybackState)
+            /// Accept the observed state.
+            case apply(PlaybackState?)
+        }
+
+        var outcome: Outcome
+        /// The receiver restart wait expired and should be cleared.
+        var restartTimedOut = false
+        /// The pending selected track was confirmed or expired and should be cleared,
+        /// along with any pending restoration.
+        var clearsPendingTrack = false
+    }
+
+    /// Receiver recovery progresses from waiting for a requested restart to actively
+    /// rediscovering the receiver and restoring its snapshot.
+    fileprivate enum ReceiverRecovery: Sendable {
+        case idle
+        case awaitingRestart(snapshot: PlaybackState, deadline: ContinuousClock.Instant)
+        case recovering(id: UUID, task: Task<Void, Never>)
+
+        var restartDeadline: ContinuousClock.Instant? {
+            guard case .awaitingRestart(_, let deadline) = self else { return nil }
+            return deadline
+        }
+
+        var task: Task<Void, Never>? {
+            guard case .recovering(_, let task) = self else { return nil }
+            return task
+        }
+
+        var isRecovering: Bool { task != nil }
+
+        func isCurrentRun(_ identifier: UUID) -> Bool {
+            guard case .recovering(let id, _) = self else { return false }
+            return id == identifier
+        }
     }
 }
 
