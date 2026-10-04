@@ -1121,14 +1121,18 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
         self.pauseError = pauseError
     }
 
-    func currentUser() async throws -> SpotifyUser { throw PlaceholderError.notConfigured }
+    func currentUser() async throws -> SpotifyUser { throw SpotifyAPIError.invalidResponse }
     func recentlyPlayed() async throws -> [SpotifyTrack] {
         calls.append("recently-played")
         return recentlyPlayedTracks
     }
-    func savedTracks() async throws -> [SpotifyTrack] { [] }
-    func savedAlbums() async throws -> [SpotifyAlbumSummary] { [] }
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary] { [] }
+    func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> { Page(items: [], next: nil) }
+    func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary> { Page(items: [], next: nil) }
+    func currentUserPlaylistsPage(after next: URL?) async throws -> Page<SpotifyPlaylistSummary> { Page(items: [], next: nil) }
+    func playlistDetail(for playlist: SpotifyPlaylistSummary) async throws -> SpotifyPlaylistDetail {
+        SpotifyPlaylistDetail(summary: playlist, tracks: [], itemAccess: .restricted)
+    }
     func playbackState() async throws -> PlaybackState? {
         calls.append("playback")
         guard !playbackResponses.isEmpty else { return nil }

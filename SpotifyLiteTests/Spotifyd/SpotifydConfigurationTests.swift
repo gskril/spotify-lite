@@ -42,7 +42,7 @@ final class SpotifydConfigurationTests: XCTestCase {
 
     func testRedactionRemovesOAuthAndBearerSecrets() {
         let raw = "https://callback/?code=secret-code&state=secret-state Authorization: Bearer abc.def_123"
-        let redacted = SpotifydSupervisor.redact(raw)
+        let redacted = Redaction.redact(raw)
 
         XCTAssertFalse(redacted.contains("secret-code"))
         XCTAssertFalse(redacted.contains("secret-state"))

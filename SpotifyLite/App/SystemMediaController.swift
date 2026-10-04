@@ -66,7 +66,7 @@ final class SystemMediaController {
         let elapsed = min(Double(playback.progressMS) / 1_000, duration)
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.name,
-            MPMediaItemPropertyArtist: track.artists.map(\.name).joined(separator: ", "),
+            MPMediaItemPropertyArtist: track.artists.displayNames,
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: max(0, elapsed),
             MPNowPlayingInfoPropertyPlaybackRate: playback.isPlaying ? 1.0 : 0.0,

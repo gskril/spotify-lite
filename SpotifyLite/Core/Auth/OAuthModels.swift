@@ -62,9 +62,3 @@ enum SpotifyAuthorizationError: Error, Sendable, Equatable, LocalizedError {
         }
     }
 }
-
-protocol SpotifyAccessTokenRefreshing: SpotifyAuthorizing {
-    /// Forces a refresh even when the cached access token has not expired.
-    /// The API client uses this once after a 401 response.
-    func refreshAccessToken() async throws -> String
-}

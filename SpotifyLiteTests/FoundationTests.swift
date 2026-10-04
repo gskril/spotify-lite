@@ -151,7 +151,7 @@ final class FoundationTests: XCTestCase {
             album: nil
         )
 
-        let preview = AppEnvironment.previewPlayback(for: selected, preserving: previous)
+        let preview = PlaybackState.preview(selected, preserving: previous)
 
         XCTAssertEqual(preview.item, selected)
         XCTAssertEqual(preview.progressMS, 0)

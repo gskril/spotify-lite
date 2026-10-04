@@ -29,7 +29,7 @@ final class DiagnosticLog: @unchecked Sendable {
 
     func record(_ event: String, _ fields: [String: String] = [:]) {
         let timestamp = Date().ISO8601Format(.iso8601(timeZone: .gmt, includingFractionalSeconds: true))
-        let clean = fields.mapValues { SpotifydSupervisor.redact($0) }
+        let clean = fields.mapValues { Redaction.redact($0) }
         queue.async { [self] in
             do {
                 sequence += 1
