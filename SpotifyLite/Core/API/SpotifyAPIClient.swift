@@ -429,10 +429,7 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
 
             if http.statusCode == 401, !retriedUnauthorized {
                 retriedUnauthorized = true
-                guard let refreshing = authorizer as? any SpotifyAccessTokenRefreshing else {
-                    throw SpotifyAPIError.unauthorized(message: "Spotify authorization expired. Please sign in again.")
-                }
-                token = try await refreshing.refreshAccessToken()
+                token = try await authorizer.refreshAccessToken()
                 continue
             }
 

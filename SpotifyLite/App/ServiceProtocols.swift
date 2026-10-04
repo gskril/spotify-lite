@@ -3,6 +3,9 @@ import Foundation
 protocol SpotifyAuthorizing: Sendable {
     func beginAuthorization() async throws
     func validAccessToken() async throws -> String
+    /// Forces a refresh even when the cached access token has not expired.
+    /// The API client uses this once after a 401 response.
+    func refreshAccessToken() async throws -> String
     func signOut() async throws
 }
 

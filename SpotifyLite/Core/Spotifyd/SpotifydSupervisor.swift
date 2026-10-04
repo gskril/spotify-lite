@@ -43,7 +43,7 @@ actor SpotifydSupervisor: SpotifydManaging {
         let isAuthentication: Bool
     }
 
-    private let eventBus = SpotifydEventBus()
+    private let eventBus = BroadcastStream<SpotifydEvent>(bufferSize: 256)
     private var configuration: SpotifydSupervisorConfiguration
     private var discoveredExecutableURL: URL?
     private var child: RunningChild?
@@ -327,7 +327,7 @@ actor SpotifydSupervisor: SpotifydManaging {
     }
 
     private func appendLog(_ unsafeLine: String) {
-        let line = Self.redact(unsafeLine)
+        let line = Redaction.redact(unsafeLine)
         DiagnosticLog.shared.record("receiver.log", ["message": line])
         logTail.append(line)
         if logTail.count > configuration.logTailLineLimit {
@@ -513,7 +513,7 @@ actor SpotifydSupervisor: SpotifydManaging {
             try process.run()
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (process.terminationStatus, Self.redact(String(decoding: data.prefix(64_000), as: UTF8.self)))
+            return (process.terminationStatus, Redaction.redact(String(decoding: data.prefix(64_000), as: UTF8.self)))
         } catch {
             throw SpotifydSupervisorError.launch(safeDescription(of: error))
         }
@@ -526,22 +526,6 @@ actor SpotifydSupervisor: SpotifydManaging {
     }
 
     private func safeDescription(of error: Error) -> String {
-        Self.redact((error as NSError).localizedDescription)
-    }
-
-    static func redact(_ value: String) -> String {
-        var redacted = String(value.prefix(4_096))
-        let querySecret = #"(?i)(access_token|refresh_token|code|state|password|username)=([^&\s]+)"#
-        redacted = redacted.replacingOccurrences(
-            of: querySecret,
-            with: "$1=<redacted>",
-            options: .regularExpression
-        )
-        redacted = redacted.replacingOccurrences(
-            of: #"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*"#,
-            with: "Bearer <redacted>",
-            options: .regularExpression
-        )
-        return redacted
+        Redaction.redact((error as NSError).localizedDescription)
     }
 }

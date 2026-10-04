@@ -338,7 +338,7 @@ final class SpotifyAPIClientTests: XCTestCase {
     }
 }
 
-private actor APIMockAuthorizer: SpotifyAccessTokenRefreshing {
+private actor APIMockAuthorizer: SpotifyAuthorizing {
     private var token: String
     private let refreshedToken: String
     private(set) var refreshCount = 0
