@@ -29,8 +29,9 @@ incident; the last was a play request at 00:29:11.
 ## Source trace and limits
 
 `SpotifydSupervisor.appendLog` recognizes this error, holds the playback snapshot,
-and schedules a receiver restart. `PlaybackCoordinator.recoverReceiverPlayback`
-discovers the replacement and restores the snapshot. The observed process exit
+and schedules a receiver restart. `PlaybackCoordinator.receiverConnectionInterrupted`
+then starts `runReceiverRecovery`, which discovers the replacement and restores the
+snapshot. The observed process exit
 was requested recovery, not a spontaneous crash.
 
 The installed receiver reports spotifyd 0.4.2. Its published dependency lockfile

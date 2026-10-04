@@ -87,7 +87,7 @@ struct SettingsView: View {
                 }
 
                 settingsSection("Playback behavior", symbol: "slider.horizontal.3") {
-                    Label("Spotify Lite transfers playback only when you choose Play on this Mac.", systemImage: "hand.raised")
+                    Label("Choosing music plays it on this Mac. Use the device picker to continue somewhere else.", systemImage: "hand.raised")
                         .foregroundStyle(.secondary)
                     Label("Volume controls appear only when the active device reports volume support.", systemImage: "speaker.wave.2")
                         .foregroundStyle(.secondary)
