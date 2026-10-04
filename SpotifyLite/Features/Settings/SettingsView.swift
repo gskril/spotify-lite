@@ -4,7 +4,6 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var environment: AppEnvironment
     @AppStorage(SpotifyLitePreferences.clientIDKey) private var clientID = ""
-    @AppStorage(SpotifyLitePreferences.receiverNameKey) private var receiverName = "Spotify Lite"
     @State private var installation: SpotifydInstallation?
     @State private var isWorking = false
     @State private var statusMessage: String?
@@ -76,8 +75,6 @@ struct SettingsView: View {
                     }
 
                     Divider()
-                    TextField("Receiver name", text: $receiverName)
-                        .textFieldStyle(.roundedBorder)
                     Label(
                         "The receiver stays available while Spotify Lite is open and stops when the app quits.",
                         systemImage: "bolt.horizontal.circle"
