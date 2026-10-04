@@ -40,7 +40,7 @@ struct TrackRow: View {
                 Text(track.name)
                     .fontWeight(.medium)
                     .lineLimit(1)
-                Text(track.artists.map(\.name).joined(separator: ", "))
+                Text(track.artists.displayNames)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -73,5 +73,47 @@ extension Int {
     var durationText: String {
         let totalSeconds = self / 1_000
         return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
+    }
+}
+
+/// Tracks numbered from 1, each playable on click. `onPlay` receives the zero-based index.
+struct NumberedTrackList: View {
+    let tracks: [SpotifyTrack]
+    let onPlay: (SpotifyTrack, Int) -> Void
+
+    var body: some View {
+        List(Array(tracks.enumerated()), id: \.element.id) { index, track in
+            HStack(spacing: 10) {
+                Text("\(index + 1)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, alignment: .trailing)
+                TrackRow(track: track) { onPlay(track, index) }
+            }
+        }
+        .listStyle(.inset)
+    }
+}
+
+/// Gradient tile with an SF Symbol, used for mixes generated on device.
+struct MixArtwork: View {
+    let symbol: String
+    let size: CGFloat
+    let cornerRadius: CGFloat
+    let symbolSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(LinearGradient(
+                    colors: [AppTheme.accent, .purple, .indigo],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+            Image(systemName: symbol)
+                .font(.system(size: symbolSize, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
     }
 }

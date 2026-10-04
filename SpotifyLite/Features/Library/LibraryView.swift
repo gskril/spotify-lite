@@ -65,7 +65,7 @@ struct LibraryView: View {
             }
         case .albums:
             if albums.isEmpty { emptyView(for: selection) }
-            else { collectionGrid(albums.map { ($0.id, $0.name, $0.artists.map(\.name).joined(separator: ", "), $0.images.artworkURL(forPointSize: 148), $0.uri, "square.stack") }, section: .albums) }
+            else { collectionGrid(albums.map { ($0.id, $0.name, $0.artists.displayNames, $0.images.artworkURL(forPointSize: 148), $0.uri, "square.stack") }, section: .albums) }
         case .playlists:
             if playlists.isEmpty { emptyView(for: selection) }
             else { playlistGrid }

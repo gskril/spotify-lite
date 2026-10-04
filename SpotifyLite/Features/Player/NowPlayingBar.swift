@@ -58,7 +58,7 @@ struct NowPlayingBar: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track?.name ?? "Nothing playing")
                         .fontWeight(.semibold).lineLimit(1)
-                    Text(track.map { $0.artists.map(\.name).joined(separator: ", ") } ?? playerSubtitle)
+                    Text(track.map { $0.artists.displayNames } ?? playerSubtitle)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
@@ -232,7 +232,7 @@ private struct QueueView: View {
             ArtworkView(url: track.album?.images.artworkURL(forPointSize: 40), size: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.name).fontWeight(.medium).lineLimit(1)
-                Text(track.artists.map(\.name).joined(separator: ", "))
+                Text(track.artists.displayNames)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -460,7 +460,7 @@ struct ExpandedPlayerView: View {
                 .shadow(color: .black.opacity(0.25), radius: 20, y: 10)
             VStack(spacing: 5) {
                 Text(track?.name ?? "Nothing playing").font(.title2.bold()).lineLimit(1)
-                Text(track?.artists.map(\.name).joined(separator: ", ") ?? "Choose music from Home, Library, or Search")
+                Text(track?.artists.displayNames ?? "Choose music from Home, Library, or Search")
                     .foregroundStyle(.secondary).lineLimit(1)
             }
             VStack(spacing: 6) {

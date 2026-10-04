@@ -47,6 +47,11 @@ struct SpotifyArtist: Codable, Sendable, Equatable, Identifiable {
     let images: [SpotifyImage]?
 }
 
+extension Collection where Element == SpotifyArtist {
+    /// How every screen credits a track or album: "Artist One, Artist Two".
+    var displayNames: String { map(\.name).joined(separator: ", ") }
+}
+
 struct SpotifyAlbumSummary: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String

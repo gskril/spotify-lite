@@ -18,20 +18,37 @@ struct RootView: View {
             }
 
             if let playlist = environment.presentedPlaylist {
-                PlaylistModalLayer(
-                    environment: environment,
-                    playlist: playlist,
+                ModalCardLayer(
+                    id: playlist.id,
+                    closeLabel: "Close playlist",
+                    backdropIdentifier: "playlistBackdrop",
                     onDismiss: environment.dismissPlaylist
-                )
+                ) {
+                    PlaylistDetailView(
+                        environment: environment,
+                        playlist: playlist,
+                        onDismiss: environment.dismissPlaylist
+                    )
+                }
                 .zIndex(10)
             }
 
             if let mix = environment.presentedGeneratedMix {
-                GeneratedMixModalLayer(
-                    environment: environment,
-                    mix: mix,
+                ModalCardLayer(
+                    id: mix.id,
+                    closeLabel: "Close mix",
+                    backdropIdentifier: "mixBackdrop",
                     onDismiss: environment.dismissGeneratedMix
-                )
+                ) {
+                    GeneratedMixDetailView(
+                        environment: environment,
+                        title: mix.title,
+                        subtitle: mix.subtitle,
+                        symbol: mix.symbol,
+                        tracks: mix.tracks,
+                        onDismiss: environment.dismissGeneratedMix
+                    )
+                }
                 .zIndex(10)
             }
         }

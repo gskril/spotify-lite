@@ -12,18 +12,7 @@ struct GeneratedMixDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 18) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(LinearGradient(
-                            colors: [AppTheme.accent, .purple, .indigo],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                    Image(systemName: symbol)
-                        .font(.system(size: 40, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 112, height: 112)
+                MixArtwork(symbol: symbol, size: 112, cornerRadius: 14, symbolSize: 40)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("MADE FOR THIS MOMENT")
@@ -50,16 +39,7 @@ struct GeneratedMixDetailView: View {
 
             Divider()
 
-            List(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                HStack(spacing: 10) {
-                    Text("\(index + 1)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .trailing)
-                    TrackRow(track: track) { play(track, at: index) }
-                }
-            }
-            .listStyle(.inset)
+            NumberedTrackList(tracks: tracks) { track, index in play(track, at: index) }
         }
         .frame(minWidth: 620, idealWidth: 700, minHeight: 520, idealHeight: 650)
     }
@@ -71,44 +51,5 @@ struct GeneratedMixDetailView: View {
 
     private func play(_ track: SpotifyTrack, at index: Int) {
         environment.playLocally(.uris(tracks.map(\.uri), offset: index), preview: track)
-    }
-}
-
-struct GeneratedMixModalLayer: View {
-    @ObservedObject var environment: AppEnvironment
-    let mix: GeneratedMixPresentation
-    let onDismiss: () -> Void
-
-    var body: some View {
-        ZStack {
-            Button(action: onDismiss) {
-                Color.black.opacity(0.58)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .accessibilityLabel("Close mix")
-
-            GeneratedMixDetailView(
-                environment: environment,
-                title: mix.title,
-                subtitle: mix.subtitle,
-                symbol: mix.symbol,
-                tracks: mix.tracks,
-                onDismiss: onDismiss
-            )
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.12))
-            }
-            .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
-            .padding(28)
-            .accessibilityAddTraits(.isModal)
-        }
-        .transition(.opacity.combined(with: .scale(scale: 0.985)))
-        .animation(.easeOut(duration: 0.16), value: mix.id)
     }
 }

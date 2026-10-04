@@ -101,21 +101,8 @@ struct HomeView: View {
             )
         } label: {
             HStack(spacing: 22) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 18)
-                        .fill(
-                            LinearGradient(
-                                colors: [AppTheme.accent, .purple, .indigo],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Image(systemName: dayPartSymbol)
-                        .font(.system(size: 48, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 142, height: 142)
-                .shadow(color: AppTheme.accent.opacity(0.2), radius: 16, y: 8)
+                MixArtwork(symbol: dayPartSymbol, size: 142, cornerRadius: 18, symbolSize: 48)
+                    .shadow(color: AppTheme.accent.opacity(0.2), radius: 16, y: 8)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("MADE FOR THIS MOMENT")
