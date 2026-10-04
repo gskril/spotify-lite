@@ -123,7 +123,7 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, 2)
     }
 
-    func testSavedTracksFollowsNextAndSkipsMalformedItems() async throws {
+    func testRecentlyPlayedFollowsNextAndSkipsMalformedItems() async throws {
         let pageOne = #"{"items":[{"track":{"id":"one","name":"One","uri":"spotify:track:one","duration_ms":100,"explicit":false,"artists":[]}},null],"next":"https://unit.test/v1/me/tracks?offset=2"}"#
         let pageTwo = #"{"items":[{"track":{"id":"two","name":"Two","uri":"spotify:track:two","duration_ms":200,"explicit":false,"artists":[]}}],"next":null}"#
         let recorder = APIRequestRecorder(responses: [
@@ -133,7 +133,7 @@ final class SpotifyAPIClientTests: XCTestCase {
         APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
         let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
 
-        let tracks = try await api.savedTracks()
+        let tracks = try await api.recentlyPlayed()
 
         XCTAssertEqual(tracks.map(\.id), ["one", "two"])
         XCTAssertEqual(recorder.requests.count, 2)

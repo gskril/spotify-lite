@@ -13,8 +13,6 @@ protocol SpotifyAPIProviding: Sendable {
     func currentUser() async throws -> SpotifyUser
     func recentlyPlayed() async throws -> [SpotifyTrack]
     func mostRecentlyPlayed() async throws -> SpotifyTrack?
-    func savedTracks() async throws -> [SpotifyTrack]
-    func savedAlbums() async throws -> [SpotifyAlbumSummary]
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary]
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack>
     func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary>
@@ -40,25 +38,6 @@ protocol SpotifyAPIProviding: Sendable {
 extension SpotifyAPIProviding {
     func mostRecentlyPlayed() async throws -> SpotifyTrack? {
         try await recentlyPlayed().first
-    }
-
-    func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> {
-        guard next == nil else { return Page(items: [], next: nil) }
-        return Page(items: try await savedTracks(), next: nil)
-    }
-
-    func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary> {
-        guard next == nil else { return Page(items: [], next: nil) }
-        return Page(items: try await savedAlbums(), next: nil)
-    }
-
-    func currentUserPlaylistsPage(after next: URL?) async throws -> Page<SpotifyPlaylistSummary> {
-        guard next == nil else { return Page(items: [], next: nil) }
-        return Page(items: try await currentUserPlaylists(), next: nil)
-    }
-
-    func playlistDetail(for playlist: SpotifyPlaylistSummary) async throws -> SpotifyPlaylistDetail {
-        SpotifyPlaylistDetail(summary: playlist, tracks: [], itemAccess: .restricted)
     }
 }
 

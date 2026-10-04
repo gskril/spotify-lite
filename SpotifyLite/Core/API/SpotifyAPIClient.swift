@@ -40,19 +40,15 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
 
     func recentlyPlayed() async throws -> [SpotifyTrack] {
         try await collect(
-            first: Endpoint(
-                method: "GET",
-                path: "me/player/recently-played",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
-            as: LossTolerant<RecentlyPlayedItem>.self,
+            first: Self.firstPage("me/player/recently-played"),
+            as: LossTolerant<TrackItem>.self,
             transform: { $0.value?.track }
         )
     }
 
     func mostRecentlyPlayed() async throws -> SpotifyTrack? {
         let page = try await decode(
-            SpotifyPage<LossTolerant<RecentlyPlayedItem>>.self,
+            SpotifyPage<LossTolerant<TrackItem>>.self,
             from: Endpoint(
                 method: "GET",
                 path: "me/player/recently-played",
@@ -62,50 +58,18 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         return page.items.first?.value?.track
     }
 
-    func savedTracks() async throws -> [SpotifyTrack] {
-        try await collect(
-            first: Endpoint(
-                method: "GET",
-                path: "me/tracks",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
-            as: LossTolerant<SavedTrackItem>.self,
-            transform: { $0.value?.track }
-        )
-    }
-
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> {
         try await collectPage(
-            first: Endpoint(
-                method: "GET",
-                path: "me/tracks",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
+            first: Self.firstPage("me/tracks"),
             after: next,
-            as: LossTolerant<SavedTrackItem>.self,
+            as: LossTolerant<TrackItem>.self,
             transform: { $0.value?.track }
-        )
-    }
-
-    func savedAlbums() async throws -> [SpotifyAlbumSummary] {
-        try await collect(
-            first: Endpoint(
-                method: "GET",
-                path: "me/albums",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
-            as: LossTolerant<SavedAlbumItem>.self,
-            transform: { $0.value?.album }
         )
     }
 
     func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary> {
         try await collectPage(
-            first: Endpoint(
-                method: "GET",
-                path: "me/albums",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
+            first: Self.firstPage("me/albums"),
             after: next,
             as: LossTolerant<SavedAlbumItem>.self,
             transform: { $0.value?.album }
@@ -114,11 +78,7 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
 
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary] {
         try await collect(
-            first: Endpoint(
-                method: "GET",
-                path: "me/playlists",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
+            first: Self.firstPage("me/playlists"),
             as: LossTolerant<SpotifyPlaylistSummary>.self,
             transform: { $0.value }
         )
@@ -126,11 +86,7 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
 
     func currentUserPlaylistsPage(after next: URL?) async throws -> Page<SpotifyPlaylistSummary> {
         try await collectPage(
-            first: Endpoint(
-                method: "GET",
-                path: "me/playlists",
-                query: [URLQueryItem(name: "limit", value: "50")]
-            ),
+            first: Self.firstPage("me/playlists"),
             after: next,
             as: LossTolerant<SpotifyPlaylistSummary>.self,
             transform: { $0.value }
@@ -157,29 +113,11 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
             return SpotifyPlaylistDetail(summary: summary, tracks: [], itemAccess: .restricted)
         }
 
-        var tracks = firstPage.items.compactMap { $0.value?.track }
-        var next = firstPage.next.flatMap(URL.init(string:))
-        var visited = Set<URL>()
-        var pageCount = 1
-
-        while let pageURL = next {
-            try Task.checkCancellation()
-            guard visited.insert(pageURL).inserted else {
-                throw SpotifyAPIError.paginationLimitExceeded
-            }
-            pageCount += 1
-            guard pageCount <= configuration.maximumPages else {
-                throw SpotifyAPIError.paginationLimitExceeded
-            }
-
-            let page = try await decode(
-                SpotifyPage<LossTolerant<PlaylistItemResponse>>.self,
-                from: Endpoint(method: "GET", absoluteURL: pageURL)
-            )
-            tracks.append(contentsOf: page.items.compactMap { $0.value?.track })
-            next = page.next.flatMap(URL.init(string:))
-        }
-
+        let tracks = try await collectRemaining(
+            after: firstPage,
+            as: LossTolerant<PlaylistItemResponse>.self,
+            transform: { $0.value?.track }
+        )
         return SpotifyPlaylistDetail(summary: summary, tracks: tracks, itemAccess: .available)
     }
 
@@ -264,37 +202,27 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
 
     func seek(to milliseconds: Int, on deviceID: String?) async throws {
         guard milliseconds >= 0 else { throw SpotifyAPIError.invalidRequest("The seek position cannot be negative.") }
-        var query = [URLQueryItem(name: "position_ms", value: String(milliseconds))]
-        query.append(contentsOf: deviceQuery(deviceID))
-        try await send(Endpoint(method: "PUT", path: "me/player/seek", query: query, isMutation: true))
+        try await playbackCommand(method: "PUT", path: "me/player/seek", deviceID: deviceID, query: [URLQueryItem(name: "position_ms", value: String(milliseconds))])
     }
 
     func setVolume(_ percent: Int, on deviceID: String?) async throws {
         guard (0...100).contains(percent) else {
             throw SpotifyAPIError.invalidRequest("Volume must be between 0 and 100 percent.")
         }
-        var query = [URLQueryItem(name: "volume_percent", value: String(percent))]
-        query.append(contentsOf: deviceQuery(deviceID))
-        try await send(Endpoint(method: "PUT", path: "me/player/volume", query: query, isMutation: true))
+        try await playbackCommand(method: "PUT", path: "me/player/volume", deviceID: deviceID, query: [URLQueryItem(name: "volume_percent", value: String(percent))])
     }
 
     func setShuffle(_ enabled: Bool, on deviceID: String?) async throws {
-        var query = [URLQueryItem(name: "state", value: String(enabled))]
-        query.append(contentsOf: deviceQuery(deviceID))
-        try await send(Endpoint(method: "PUT", path: "me/player/shuffle", query: query, isMutation: true))
+        try await playbackCommand(method: "PUT", path: "me/player/shuffle", deviceID: deviceID, query: [URLQueryItem(name: "state", value: String(enabled))])
     }
 
     func setRepeat(_ mode: RepeatMode, on deviceID: String?) async throws {
-        var query = [URLQueryItem(name: "state", value: mode.rawValue)]
-        query.append(contentsOf: deviceQuery(deviceID))
-        try await send(Endpoint(method: "PUT", path: "me/player/repeat", query: query, isMutation: true))
+        try await playbackCommand(method: "PUT", path: "me/player/repeat", deviceID: deviceID, query: [URLQueryItem(name: "state", value: mode.rawValue)])
     }
 
     func addToQueue(uri: String, on deviceID: String?) async throws {
         guard !uri.isEmpty else { throw SpotifyAPIError.invalidRequest("A Spotify item URI is required.") }
-        var query = [URLQueryItem(name: "uri", value: uri)]
-        query.append(contentsOf: deviceQuery(deviceID))
-        try await send(Endpoint(method: "POST", path: "me/player/queue", query: query, isMutation: true))
+        try await playbackCommand(method: "POST", path: "me/player/queue", deviceID: deviceID, query: [URLQueryItem(name: "uri", value: uri)])
     }
 
     func search(_ query: String, types: Set<SearchType>) async throws -> SearchResults {
@@ -328,13 +256,22 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         ))
     }
 
-    private func playbackCommand(method: String, path: String, deviceID: String?) async throws {
+    private func playbackCommand(
+        method: String,
+        path: String,
+        deviceID: String?,
+        query: [URLQueryItem] = []
+    ) async throws {
         try await send(Endpoint(
             method: method,
             path: path,
-            query: deviceQuery(deviceID),
+            query: query + deviceQuery(deviceID),
             isMutation: true
         ))
+    }
+
+    private static func firstPage(_ path: String) -> Endpoint {
+        Endpoint(method: "GET", path: path, query: [URLQueryItem(name: "limit", value: "50")])
     }
 
     private func deviceQuery(_ deviceID: String?) -> [URLQueryItem] {
@@ -360,25 +297,34 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         as itemType: Item.Type,
         transform: @Sendable (Item) -> Output?
     ) async throws -> [Output] {
-        var endpoint: Endpoint? = first
-        var visited = Set<URL>()
-        var output: [Output] = []
-        var pageCount = 0
+        try Task.checkCancellation()
+        let firstURL = try makeURL(for: first)
+        let page = try await decode(SpotifyPage<Item>.self, from: first)
+        return try await collectRemaining(after: page, visited: [firstURL], as: itemType, transform: transform)
+    }
 
-        while let current = endpoint {
+    /// Returns `page`'s items followed by every later page's, refusing loops and runaway
+    /// pagination.
+    private func collectRemaining<Item: Decodable & Sendable, Output: Sendable>(
+        after page: SpotifyPage<Item>,
+        visited: Set<URL> = [],
+        as itemType: Item.Type,
+        transform: @Sendable (Item) -> Output?
+    ) async throws -> [Output] {
+        var output = page.items.compactMap(transform)
+        var next = page.next.flatMap(URL.init(string:))
+        var visited = visited
+        var pageCount = 1
+
+        while let pageURL = next {
             try Task.checkCancellation()
-            let currentURL = try makeURL(for: current)
-            guard visited.insert(currentURL).inserted else { throw SpotifyAPIError.paginationLimitExceeded }
+            guard visited.insert(pageURL).inserted else { throw SpotifyAPIError.paginationLimitExceeded }
             pageCount += 1
             guard pageCount <= configuration.maximumPages else { throw SpotifyAPIError.paginationLimitExceeded }
 
-            let page = try await decode(SpotifyPage<Item>.self, from: current)
+            let page = try await decode(SpotifyPage<Item>.self, from: Endpoint(method: "GET", absoluteURL: pageURL))
             output.append(contentsOf: page.items.compactMap(transform))
-            if let next = page.next.flatMap(URL.init(string:)) {
-                endpoint = Endpoint(method: "GET", absoluteURL: next)
-            } else {
-                endpoint = nil
-            }
+            next = page.next.flatMap(URL.init(string:))
         }
         return output
     }
@@ -563,11 +509,8 @@ private struct SpotifyPage<Item: Decodable & Sendable>: Decodable, Sendable {
     let next: String?
 }
 
-private struct RecentlyPlayedItem: Decodable, Sendable {
-    let track: SpotifyTrack?
-}
-
-private struct SavedTrackItem: Decodable, Sendable {
+/// A recently played or saved track entry: both wrap the track in a `track` field.
+private struct TrackItem: Decodable, Sendable {
     let track: SpotifyTrack?
 }
 
