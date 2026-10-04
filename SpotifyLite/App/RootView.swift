@@ -18,27 +18,44 @@ struct RootView: View {
             }
 
             if let playlist = environment.presentedPlaylist {
-                PlaylistModalLayer(
-                    environment: environment,
-                    playlist: playlist,
+                ModalCardLayer(
+                    id: playlist.id,
+                    closeLabel: "Close playlist",
+                    backdropIdentifier: "playlistBackdrop",
                     onDismiss: environment.dismissPlaylist
-                )
+                ) {
+                    PlaylistDetailView(
+                        environment: environment,
+                        playlist: playlist,
+                        onDismiss: environment.dismissPlaylist
+                    )
+                }
                 .zIndex(10)
             }
 
             if let mix = environment.presentedGeneratedMix {
-                GeneratedMixModalLayer(
-                    environment: environment,
-                    mix: mix,
+                ModalCardLayer(
+                    id: mix.id,
+                    closeLabel: "Close mix",
+                    backdropIdentifier: "mixBackdrop",
                     onDismiss: environment.dismissGeneratedMix
-                )
+                ) {
+                    GeneratedMixDetailView(
+                        environment: environment,
+                        title: mix.title,
+                        subtitle: mix.subtitle,
+                        symbol: mix.symbol,
+                        tracks: mix.tracks,
+                        onDismiss: environment.dismissGeneratedMix
+                    )
+                }
                 .zIndex(10)
             }
         }
         .tint(AppTheme.accent)
         .task { await bootstrapIfPossible() }
-        .task { await observeReceiver() }
-        .task { await observePlayback() }
+        .task { await environment.observeReceiver() }
+        .task { await environment.observePlayback() }
         .task { environment.installKeyboardMonitor() }
         .task { environment.installSystemMediaCommands() }
         .onChange(of: scenePhase, initial: true) { _, phase in
@@ -70,9 +87,9 @@ struct RootView: View {
                 )
             }
             Task {
-                do { try await environment.spotifyd.startKeepingAlive() }
+                do { try await environment.startReceiver() }
                 catch SpotifydSupervisorError.authenticationRequired {
-                    environment.spotifydState = .needsAuthentication
+                    // The receiver state already prompts for authentication.
                 } catch { environment.report(error) }
             }
         }
@@ -112,7 +129,7 @@ struct RootView: View {
                 .listStyle(.sidebar)
 
                 HStack(spacing: 8) {
-                    Circle().fill(receiverColor).frame(width: 8, height: 8)
+                    Circle().fill(environment.spotifydState.indicatorColor).frame(width: 8, height: 8)
                     Text(receiverLabel).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                 }
@@ -142,15 +159,6 @@ struct RootView: View {
         String((user.displayName ?? user.id).prefix(1)).uppercased()
     }
 
-    private var receiverColor: Color {
-        switch environment.spotifydState {
-        case .running: AppTheme.accent
-        case .starting: .orange
-        case .crashed: .red
-        default: .secondary
-        }
-    }
-
     private var receiverLabel: String {
         switch environment.spotifydState {
         case .running: "Receiver running"
@@ -174,45 +182,6 @@ struct RootView: View {
             environment.sessionState = .ready(user)
         } catch {
             environment.sessionState = .needsSetup
-        }
-    }
-
-    private func observeReceiver() async {
-        let installation = await environment.spotifyd.inspectInstallation()
-        if !installation.isInstalled { environment.spotifydState = .notInstalled }
-
-        for await event in environment.spotifyd.events {
-            guard !Task.isCancelled else { return }
-            switch event {
-            case .stateChanged(let state): environment.spotifydState = state
-            case .connectionWillRestart:
-                await environment.playbackCoordinator.receiverWillRestart()
-            case .connectionInterrupted(let restartReceiver):
-                await environment.playbackCoordinator.receiverConnectionInterrupted(
-                    restartReceiver: restartReceiver
-                )
-            case .exited(let status):
-                if status == 0 { environment.spotifydState = .stopped }
-                else { environment.spotifydState = .crashed(status: status) }
-            case .log(let line): await environment.playbackCoordinator.receiverLog(line)
-            }
-        }
-    }
-
-    private func observePlayback() async {
-        for await event in environment.playbackCoordinator.events {
-            guard !Task.isCancelled else { return }
-            switch event {
-            case .stateChanged(let playback):
-                if environment.isStartingPlayback, playback == nil { continue }
-                environment.playback = playback
-            case .receiverChanged(let device):
-                if let device, environment.playback != nil {
-                    environment.playback?.device = device
-                }
-            case .commandFailed:
-                break
-            }
         }
     }
 }

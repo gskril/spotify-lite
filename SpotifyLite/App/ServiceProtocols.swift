@@ -3,6 +3,9 @@ import Foundation
 protocol SpotifyAuthorizing: Sendable {
     func beginAuthorization() async throws
     func validAccessToken() async throws -> String
+    /// Forces a refresh even when the cached access token has not expired.
+    /// The API client uses this once after a 401 response.
+    func refreshAccessToken() async throws -> String
     func signOut() async throws
 }
 
@@ -10,8 +13,6 @@ protocol SpotifyAPIProviding: Sendable {
     func currentUser() async throws -> SpotifyUser
     func recentlyPlayed() async throws -> [SpotifyTrack]
     func mostRecentlyPlayed() async throws -> SpotifyTrack?
-    func savedTracks() async throws -> [SpotifyTrack]
-    func savedAlbums() async throws -> [SpotifyAlbumSummary]
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary]
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack>
     func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary>
@@ -38,32 +39,21 @@ extension SpotifyAPIProviding {
     func mostRecentlyPlayed() async throws -> SpotifyTrack? {
         try await recentlyPlayed().first
     }
-
-    func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> {
-        guard next == nil else { return Page(items: [], next: nil) }
-        return Page(items: try await savedTracks(), next: nil)
-    }
-
-    func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary> {
-        guard next == nil else { return Page(items: [], next: nil) }
-        return Page(items: try await savedAlbums(), next: nil)
-    }
-
-    func currentUserPlaylistsPage(after next: URL?) async throws -> Page<SpotifyPlaylistSummary> {
-        guard next == nil else { return Page(items: [], next: nil) }
-        return Page(items: try await currentUserPlaylists(), next: nil)
-    }
-
-    func playlistDetail(for playlist: SpotifyPlaylistSummary) async throws -> SpotifyPlaylistDetail {
-        SpotifyPlaylistDetail(summary: playlist, tracks: [], itemAccess: .restricted)
-    }
 }
 
+/// Events from the receiver supervisor. The supervisor is the only source of `SpotifydState`:
+/// it sends `.stateChanged` for every transition, including failures thrown from `start()`.
+///
+/// Recovery ordering: before the supervisor replaces a stale receiver it sends
+/// `.connectionWillRestart`, so playback holds its snapshot. Once the replacement is running
+/// it sends `.connectionInterrupted(restartReceiver: false)`, and only then does playback
+/// rediscover the receiver and restore.
 enum SpotifydEvent: Sendable, Equatable {
     case stateChanged(SpotifydState)
     case log(String)
     case connectionWillRestart
     case connectionInterrupted(restartReceiver: Bool = false)
+    /// Informational. A `.stateChanged` with the resulting state always follows.
     case exited(status: Int32)
 }
 

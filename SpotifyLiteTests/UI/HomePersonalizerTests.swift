@@ -39,7 +39,7 @@ final class HomePersonalizerTests: XCTestCase {
         XCTAssertEqual(jumpBackIn.map(\.id), ["road", "copy", "cooking"])
     }
 
-    func testRecentAlbumsAndArtistsStayUniqueAndRespectLimits() {
+    func testRecentArtistsStayUniqueAndRespectLimits() {
         let sharedAlbum = album("album-1", artist: "Artist One")
         let tracks = [
             track("a", artist: "Artist One", album: sharedAlbum),
@@ -47,7 +47,6 @@ final class HomePersonalizerTests: XCTestCase {
             track("c", artist: "Artist Two", album: album("album-2", artist: "Artist Two"))
         ]
 
-        XCTAssertEqual(HomePersonalizer.uniqueAlbums(from: tracks, limit: 1).map(\.id), ["album-1"])
         XCTAssertEqual(HomePersonalizer.artistNames(from: tracks, limit: 2), ["Artist One", "Artist Two"])
     }
 
