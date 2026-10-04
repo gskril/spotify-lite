@@ -12,7 +12,7 @@ struct SystemAuthorizationURLOpener: AuthorizationURLOpening {
     }
 }
 
-actor SpotifyAuthorizer: SpotifyAccessTokenRefreshing {
+actor SpotifyAuthorizer: SpotifyAuthorizing {
     struct Configuration: Sendable {
         var authorizationEndpoint = URL(string: "https://accounts.spotify.com/authorize")!
         var tokenEndpoint = URL(string: "https://accounts.spotify.com/api/token")!

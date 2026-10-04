@@ -29,7 +29,7 @@ final class AppEnvironment: ObservableObject {
             }
         }
     }
-    @Published var spotifydState: SpotifydState = .stopped
+    @Published private(set) var spotifydState: SpotifydState = .stopped
     @Published var alertMessage: String?
     @Published var presentedPlaylist: SpotifyPlaylistSummary?
     @Published var presentedGeneratedMix: GeneratedMixPresentation?
@@ -146,62 +146,130 @@ final class AppEnvironment: ObservableObject {
     func pause() {
         guard playback?.isPlaying == true else { return }
         playback?.isPlaying = false
-        runPlaybackCommand { coordinator, _ in try await coordinator.pause() }
+        runPlaybackCommand { try await $0.pause() }
     }
 
     func playLocally(_ request: PlayRequest, preview: SpotifyTrack? = nil) {
         guard !isStartingPlayback else { return }
         let previousPlayback = playback
         if let preview {
-            playback = Self.previewPlayback(for: preview, preserving: previousPlayback)
+            playback = .preview(preview, preserving: previousPlayback)
         }
-        runStartingPlayback(preview: preview) { coordinator in
+        runStartingPlayback(restoringOnFailure: previousPlayback) { coordinator in
             try await coordinator.playLocally(request, preview: preview)
         }
     }
 
-    func resumeLocally() {
-        runStartingPlayback { coordinator in
-            try await coordinator.resume()
-        }
-    }
-
     func skipNext() {
-        runPlaybackCommand { coordinator, _ in try await coordinator.next() }
+        runPlaybackCommand { try await $0.next() }
     }
 
     func skipPrevious() {
-        runPlaybackCommand { coordinator, _ in try await coordinator.previous() }
+        runPlaybackCommand { try await $0.previous() }
+    }
+
+    func setShuffle(_ enabled: Bool) {
+        runPlaybackCommand { try await $0.setShuffle(enabled) }
+    }
+
+    func cycleRepeat() {
+        let next = (playback?.repeatMode ?? .off).next
+        runPlaybackCommand { try await $0.setRepeat(next) }
+    }
+
+    func setVolume(_ percent: Int) {
+        let value = min(100, max(0, percent))
+        runPlaybackCommand { try await $0.setVolume(value) }
     }
 
     func adjustVolume(by delta: Int) {
-        let current = playback?.device?.volumePercent ?? 50
-        runPlaybackCommand { coordinator, _ in
-            try await coordinator.setVolume(min(100, max(0, current + delta)))
+        setVolume((playback?.device?.volumePercent ?? 50) + delta)
+    }
+
+    /// Seeks and waits for the result, so a scrubber can resync to the confirmed position.
+    func seek(to milliseconds: Int) async {
+        await performPlaybackCommand { try await $0.seek(to: milliseconds) }
+    }
+
+    func availableDevices() async throws -> [SpotifyDevice] {
+        try await playbackCoordinator.availableDevices()
+    }
+
+    /// Throws instead of alerting so the device picker can show the failure in place.
+    func transferPlayback(to device: SpotifyDevice) async throws {
+        try await playbackCoordinator.transferPlayback(to: device)
+        playback = await playbackCoordinator.currentPlayback()
+    }
+
+    /// Starts the receiver and keeps it alive, optionally stopping it first. `spotifydState`
+    /// follows the supervisor's events; this only surfaces the error.
+    func startReceiver(restart: Bool = false) async throws {
+        if restart { await spotifyd.stop() }
+        try await spotifyd.startKeepingAlive()
+    }
+
+    /// Mirrors receiver state and forwards receiver events to playback for the app's lifetime.
+    func observeReceiver() async {
+        // Subscribe before inspecting so the installation state it reports is not missed.
+        let events = spotifyd.events
+        _ = await spotifyd.inspectInstallation()
+        for await event in events {
+            guard !Task.isCancelled else { return }
+            if case .stateChanged(let state) = event { spotifydState = state }
+            await playbackCoordinator.handleReceiverEvent(event)
         }
     }
 
-    private func runPlaybackCommand(
-        _ operation: @escaping @Sendable (PlaybackCoordinator, Bool) async throws -> Void
-    ) {
-        let isPlaying = playback?.isPlaying == true
-        Task {
-            do {
-                try await operation(playbackCoordinator, isPlaying)
-                playback = await playbackCoordinator.currentPlayback()
-            } catch {
-                playback = await playbackCoordinator.currentPlayback()
-                report(error)
+    /// Mirrors coordinator playback state for the app's lifetime.
+    func observePlayback() async {
+        for await event in playbackCoordinator.events {
+            guard !Task.isCancelled else { return }
+            switch event {
+            case .stateChanged(let state):
+                if isStartingPlayback, state == nil { continue }
+                playback = state
+            case .receiverChanged(let device):
+                if let device, playback != nil {
+                    playback?.device = device
+                }
+            case .commandFailed:
+                // Awaited commands already report their own errors.
+                break
             }
         }
     }
 
+    private func runPlaybackCommand(
+        _ operation: @escaping @Sendable (PlaybackCoordinator) async throws -> Void
+    ) {
+        Task { await performPlaybackCommand(operation) }
+    }
+
+    private func performPlaybackCommand(
+        _ operation: @Sendable (PlaybackCoordinator) async throws -> Void
+    ) async {
+        do {
+            try await operation(playbackCoordinator)
+            playback = await playbackCoordinator.currentPlayback()
+        } catch {
+            playback = await playbackCoordinator.currentPlayback()
+            report(error)
+        }
+    }
+
+    /// Runs a command that may launch the local receiver. On failure the player falls back
+    /// to the coordinator's state, or to `previousPlayback` when the coordinator has none.
     private func runStartingPlayback(
-        preview: SpotifyTrack? = nil,
+        _ operation: @escaping @Sendable (PlaybackCoordinator) async throws -> Void
+    ) {
+        runStartingPlayback(restoringOnFailure: playback, operation)
+    }
+
+    private func runStartingPlayback(
+        restoringOnFailure previousPlayback: PlaybackState?,
         _ operation: @escaping @Sendable (PlaybackCoordinator) async throws -> Void
     ) {
         guard !isStartingPlayback else { return }
-        let previousPlayback = playback
         isStartingPlayback = true
         Task {
             defer { isStartingPlayback = false }
@@ -215,19 +283,5 @@ final class AppEnvironment: ObservableObject {
                 report(error)
             }
         }
-    }
-
-    static func previewPlayback(
-        for track: SpotifyTrack,
-        preserving previousPlayback: PlaybackState?
-    ) -> PlaybackState {
-        PlaybackState(
-            item: track,
-            progressMS: 0,
-            isPlaying: true,
-            device: previousPlayback?.device,
-            shuffle: previousPlayback?.shuffle ?? false,
-            repeatMode: previousPlayback?.repeatMode ?? .off
-        )
     }
 }

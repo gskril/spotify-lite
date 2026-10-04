@@ -153,9 +153,7 @@ final class PlaybackReconcileTests: XCTestCase {
     private func paused(_ state: PlaybackState) -> PlaybackState {
         var paused = state
         paused.isPlaying = false
-        if let device = state.device {
-            paused.device = makeDevice(id: device.id ?? "", active: false)
-        }
+        paused.device?.isActive = false
         return paused
     }
 

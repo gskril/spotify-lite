@@ -155,21 +155,12 @@ struct PlaylistDetailView: View {
                         symbol: "music.note.list"
                     )
                 } else {
-                    List(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        HStack(spacing: 10) {
-                            Text("\(index + 1)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24, alignment: .trailing)
-                            TrackRow(track: track) {
-                                environment.playLocally(
-                                    .context(uri: displayedPlaylist.uri, offsetURI: track.uri),
-                                    preview: track
-                                )
-                            }
-                        }
+                    NumberedTrackList(tracks: tracks) { track, _ in
+                        environment.playLocally(
+                            .context(uri: displayedPlaylist.uri, offsetURI: track.uri),
+                            preview: track
+                        )
                     }
-                    .listStyle(.inset)
                 }
             }
         }
@@ -193,43 +184,6 @@ struct PlaylistDetailView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
-    }
-}
-
-struct PlaylistModalLayer: View {
-    @ObservedObject var environment: AppEnvironment
-    let playlist: SpotifyPlaylistSummary
-    let onDismiss: () -> Void
-
-    var body: some View {
-        ZStack {
-            Button(action: onDismiss) {
-                Color.black.opacity(0.58)
-                    .contentShape(Rectangle())
-            }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .accessibilityLabel("Close playlist")
-                .accessibilityIdentifier("playlistBackdrop")
-
-            PlaylistDetailView(
-                environment: environment,
-                playlist: playlist,
-                onDismiss: onDismiss
-            )
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.12))
-            }
-            .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
-            .padding(28)
-            .accessibilityAddTraits(.isModal)
-        }
-        .transition(.opacity.combined(with: .scale(scale: 0.985)))
-        .animation(.easeOut(duration: 0.16), value: playlist.id)
     }
 }
 
