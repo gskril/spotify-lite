@@ -37,7 +37,7 @@ struct LibraryView: View {
 
             Group {
                 if isInitialLoad {
-                    LoadingView(message: "Loading (selection.rawValue.lowercased())…")
+                    LoadingView(message: "Loading \(selection.rawValue.lowercased())…")
                 } else if let errorMessage = errors[selection], itemsAreEmpty(for: selection) {
                     FeatureStateView(title: "Library unavailable", message: errorMessage, symbol: "wifi.exclamationmark", actionTitle: "Try Again") { reload(selection) }
                 } else {

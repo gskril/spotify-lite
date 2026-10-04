@@ -12,7 +12,7 @@ enum SpotifydSupervisorError: LocalizedError, Sendable, Equatable {
     var errorDescription: String? {
         switch self {
         case .notInstalled:
-            "spotifyd was not found. Install it with `brew install spotifyd` or choose the executable in Settings."
+            "spotifyd was not found. Install it with `brew install spotifyd`, then choose Recheck in Settings."
         case .invalidExecutable(let path):
             "The selected spotifyd executable is not runnable: \(path)"
         case .busy:
@@ -66,13 +66,6 @@ actor SpotifydSupervisor: SpotifydManaging {
         self.configuration = configuration
         self.defaultAudioOutputChanges = defaultAudioOutputChanges
     }
-
-    func setUserSelectedExecutableURL(_ url: URL?) {
-        configuration.userSelectedExecutableURL = url
-        discoveredExecutableURL = nil
-    }
-
-    func configuredDeviceName() -> String { configuration.deviceName }
 
     func recentLogLines() -> [String] { logTail }
 

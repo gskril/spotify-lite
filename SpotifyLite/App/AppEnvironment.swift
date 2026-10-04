@@ -160,12 +160,6 @@ final class AppEnvironment: ObservableObject {
         }
     }
 
-    func resumeLocally() {
-        runStartingPlayback { coordinator in
-            try await coordinator.resume()
-        }
-    }
-
     func skipNext() {
         runPlaybackCommand { coordinator, _ in try await coordinator.next() }
     }

@@ -279,10 +279,6 @@ actor PlaybackCoordinator {
         }
     }
 
-    func setVisible(_ visible: Bool) {
-        setObservationActivity(visible ? .active : .hidden)
-    }
-
     func availableDevices() async throws -> [SpotifyDevice] {
         try await api.devices()
     }
@@ -325,13 +321,8 @@ actor PlaybackCoordinator {
                     // the selected Connect device authoritative without restarting the context.
                     do {
                         try await self.api.play(.resume, on: deviceID)
-                    } catch let apiError as SpotifyAPIError {
-                        switch apiError {
-                        case .forbidden, .http(status: 403, reason: _, message: _):
-                            throw PlaybackCoordinatorError.deviceCommandRejected(name: device.name)
-                        default:
-                            throw apiError
-                        }
+                    } catch SpotifyAPIError.forbidden {
+                        throw PlaybackCoordinatorError.deviceCommandRejected(name: device.name)
                     }
                     confirmedDevice = try await self.waitUntilDeviceIsActive(
                         expectedID: deviceID,

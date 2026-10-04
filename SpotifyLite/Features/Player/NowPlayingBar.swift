@@ -170,10 +170,6 @@ struct NowPlayingBar: View {
         command { try await coordinator.next() }
     }
 
-    private func playLocally() {
-        environment.resumeLocally()
-    }
-
 }
 
 private struct QueueView: View {

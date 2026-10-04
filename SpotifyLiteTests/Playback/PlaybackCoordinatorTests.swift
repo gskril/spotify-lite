@@ -1121,7 +1121,7 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
         self.pauseError = pauseError
     }
 
-    func currentUser() async throws -> SpotifyUser { throw PlaceholderError.notConfigured }
+    func currentUser() async throws -> SpotifyUser { throw SpotifyAPIError.invalidResponse }
     func recentlyPlayed() async throws -> [SpotifyTrack] {
         calls.append("recently-played")
         return recentlyPlayedTracks

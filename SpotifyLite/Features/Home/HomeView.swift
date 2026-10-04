@@ -295,13 +295,6 @@ struct HomeView: View {
         }
     }
 
-    private func cleanDescription(_ description: String?) -> String? {
-        guard let description else { return nil }
-        let stripped = description.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return stripped.isEmpty ? nil : stripped
-    }
-
     private func load() { Task { await loadAsync() } }
 
     private func loadAsync() async {
@@ -366,14 +359,6 @@ enum HomePersonalizer {
         limit: Int
     ) -> [SpotifyPlaylistSummary] {
         Array(playlists.filter { !isSpotifyGenerated($0) }.prefix(limit))
-    }
-
-    static func uniqueAlbums(from tracks: [SpotifyTrack], limit: Int) -> [SpotifyAlbumSummary] {
-        var seen = Set<String>()
-        return tracks.compactMap(\.album)
-            .filter { seen.insert($0.id).inserted }
-            .prefix(limit)
-            .map { $0 }
     }
 
     static func artistNames(from tracks: [SpotifyTrack], limit: Int) -> [String] {
