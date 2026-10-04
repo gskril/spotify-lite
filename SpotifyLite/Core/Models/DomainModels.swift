@@ -112,12 +112,12 @@ struct SpotifyPlaylistDetail: Sendable, Equatable, Identifiable {
 
 struct SpotifyDevice: Codable, Sendable, Equatable, Identifiable {
     let id: String?
-    let isActive: Bool
+    var isActive: Bool
     let isPrivateSession: Bool
     let isRestricted: Bool
     let name: String
     let type: String
-    let volumePercent: Int?
+    var volumePercent: Int?
     let supportsVolume: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -134,6 +134,15 @@ enum RepeatMode: String, Codable, Sendable, CaseIterable {
     case off
     case context
     case track
+
+    /// The mode the repeat button cycles to: off → context → track → off.
+    var next: RepeatMode {
+        switch self {
+        case .off: .context
+        case .context: .track
+        case .track: .off
+        }
+    }
 }
 
 struct PlaybackState: Sendable, Equatable {
@@ -144,6 +153,24 @@ struct PlaybackState: Sendable, Equatable {
     var shuffle: Bool
     var repeatMode: RepeatMode
     var contextURI: String? = nil
+
+    /// What the player shows the instant a track is chosen, before Spotify confirms it:
+    /// the track from the start, playing, on the previous device with its shuffle and repeat.
+    static func preview(
+        _ track: SpotifyTrack,
+        preserving previous: PlaybackState?,
+        contextURI: String? = nil
+    ) -> PlaybackState {
+        PlaybackState(
+            item: track,
+            progressMS: 0,
+            isPlaying: true,
+            device: previous?.device,
+            shuffle: previous?.shuffle ?? false,
+            repeatMode: previous?.repeatMode ?? .off,
+            contextURI: contextURI
+        )
+    }
 }
 
 struct PlaybackQueue: Sendable, Equatable {

@@ -153,9 +153,9 @@ final class AppEnvironment: ObservableObject {
         guard !isStartingPlayback else { return }
         let previousPlayback = playback
         if let preview {
-            playback = Self.previewPlayback(for: preview, preserving: previousPlayback)
+            playback = .preview(preview, preserving: previousPlayback)
         }
-        runStartingPlayback(preview: preview) { coordinator in
+        runStartingPlayback(restoringOnFailure: previousPlayback) { coordinator in
             try await coordinator.playLocally(request, preview: preview)
         }
     }
@@ -190,12 +190,19 @@ final class AppEnvironment: ObservableObject {
         }
     }
 
+    /// Runs a command that may launch the local receiver. On failure the player falls back
+    /// to the coordinator's state, or to `previousPlayback` when the coordinator has none.
     private func runStartingPlayback(
-        preview: SpotifyTrack? = nil,
+        _ operation: @escaping @Sendable (PlaybackCoordinator) async throws -> Void
+    ) {
+        runStartingPlayback(restoringOnFailure: playback, operation)
+    }
+
+    private func runStartingPlayback(
+        restoringOnFailure previousPlayback: PlaybackState?,
         _ operation: @escaping @Sendable (PlaybackCoordinator) async throws -> Void
     ) {
         guard !isStartingPlayback else { return }
-        let previousPlayback = playback
         isStartingPlayback = true
         Task {
             defer { isStartingPlayback = false }
@@ -209,19 +216,5 @@ final class AppEnvironment: ObservableObject {
                 report(error)
             }
         }
-    }
-
-    static func previewPlayback(
-        for track: SpotifyTrack,
-        preserving previousPlayback: PlaybackState?
-    ) -> PlaybackState {
-        PlaybackState(
-            item: track,
-            progressMS: 0,
-            isPlaying: true,
-            device: previousPlayback?.device,
-            shuffle: previousPlayback?.shuffle ?? false,
-            repeatMode: previousPlayback?.repeatMode ?? .off
-        )
     }
 }
