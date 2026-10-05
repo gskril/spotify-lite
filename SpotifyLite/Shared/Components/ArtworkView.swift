@@ -42,9 +42,15 @@ struct ArtworkView: View {
         return ArtworkCache.shared.cachedImage(for: url, pixelSize: pixelSize)
     }
 
+    /// Keeps its own reference to the shown bitmap so a memory-cache eviction cannot blank it.
     private func load() async {
-        guard let url, currentImage == nil else { return }
+        guard let url else { return }
         let pixelSize = pixelSize
+        if let loaded, loaded.url == url, loaded.pixelSize == pixelSize { return }
+        if let cached = ArtworkCache.shared.cachedImage(for: url, pixelSize: pixelSize) {
+            loaded = (url, pixelSize, cached)
+            return
+        }
         guard let image = await ArtworkCache.shared.image(for: url, pixelSize: pixelSize),
               !Task.isCancelled else { return }
         withAnimation(.easeOut(duration: 0.2)) {
