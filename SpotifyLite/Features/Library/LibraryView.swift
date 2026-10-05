@@ -10,13 +10,23 @@ struct LibraryView: View {
 
     @ObservedObject var environment: AppEnvironment
     @State private var selection: Section = .tracks
-    @State private var tracks: [SpotifyTrack] = []
-    @State private var albums: [SpotifyAlbumSummary] = []
-    @State private var playlists: [SpotifyPlaylistSummary] = []
-    @State private var loadedSections = Set<Section>()
+    @State private var tracks: [SpotifyTrack]
+    @State private var albums: [SpotifyAlbumSummary]
+    @State private var playlists: [SpotifyPlaylistSummary]
+    @State private var loadedSections: Set<Section>
     @State private var loadingSections = Set<Section>()
-    @State private var nextPages: [Section: URL] = [:]
+    @State private var nextPages: [Section: URL]
     @State private var errors: [Section: String] = [:]
+
+    init(environment: AppEnvironment) {
+        _environment = ObservedObject(wrappedValue: environment)
+        let cached = environment.browseCache.library
+        _tracks = State(initialValue: cached.tracks)
+        _albums = State(initialValue: cached.albums)
+        _playlists = State(initialValue: cached.playlists)
+        _loadedSections = State(initialValue: Set(cached.loadedAt.keys))
+        _nextPages = State(initialValue: cached.nextPages)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,8 +149,11 @@ struct LibraryView: View {
         Task { await loadSection(section, replacing: true) }
     }
 
+    /// Fresh cached sections are reused without a request; stale ones stay visible while
+    /// their first page refreshes.
     private func loadSelectedSectionIfNeeded() async {
-        guard !loadedSections.contains(selection) else { return }
+        guard !loadedSections.contains(selection)
+            || !environment.browseCache.isLibrarySectionFresh(selection) else { return }
         await loadSection(selection, replacing: true)
     }
 
@@ -206,6 +219,7 @@ struct LibraryView: View {
                 nextPages[section] = page.next
             }
             loadedSections.insert(section)
+            storeInCache(section, replacing: replacing)
         } catch is CancellationError {
             loadingSections.remove(section)
             return
@@ -213,6 +227,20 @@ struct LibraryView: View {
             errors[section] = error.localizedDescription
         }
         loadingSections.remove(section)
+    }
+
+    private func storeInCache(_ section: Section, replacing: Bool) {
+        let cache = environment.browseCache
+        switch section {
+        case .tracks: cache.library.tracks = tracks
+        case .albums: cache.library.albums = albums
+        case .playlists: cache.library.playlists = playlists
+        }
+        cache.library.nextPages[section] = nextPages[section]
+        // Loading a later page extends the cached list without making it fresher.
+        if replacing || cache.library.loadedAt[section] == nil {
+            cache.library.loadedAt[section] = .now
+        }
     }
 
     private func play(_ track: SpotifyTrack) {

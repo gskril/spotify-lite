@@ -19,7 +19,12 @@ struct GeneratedMixPresentation: Identifiable, Equatable {
 
 @MainActor
 final class AppEnvironment: ObservableObject {
-    @Published var sessionState: AppSessionState = .needsSetup
+    @Published var sessionState: AppSessionState = .needsSetup {
+        didSet {
+            if case .ready = sessionState { return }
+            browseCache.clear()
+        }
+    }
     @Published var selectedDestination: AppDestination? = .home
     @Published var playback: PlaybackState? {
         didSet {
@@ -40,6 +45,7 @@ final class AppEnvironment: ObservableObject {
     let api: any SpotifyAPIProviding
     let spotifyd: any SpotifydManaging
     let playbackCoordinator: PlaybackCoordinator
+    let browseCache = BrowseCache()
     private let systemMediaController = SystemMediaController()
     private let playbackMemoryStore: PlaybackMemoryStore
     private var keyboardMonitor: Any?

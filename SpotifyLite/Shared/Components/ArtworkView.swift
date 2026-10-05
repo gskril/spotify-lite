@@ -6,26 +6,56 @@ struct ArtworkView: View {
     var cornerRadius: CGFloat = 7
     var symbol = "music.note"
 
+    @Environment(\.displayScale) private var displayScale
+    @State private var loaded: (url: URL, pixelSize: Int, image: CGImage)?
+
     var body: some View {
-        AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFill()
-            default:
-                ZStack {
-                    LinearGradient(
-                        colors: [.purple.opacity(0.75), AppTheme.accent.opacity(0.65)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    Image(systemName: symbol)
-                        .font(.system(size: size * 0.34, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
-                }
+        ZStack {
+            if let image = currentImage {
+                Image(decorative: image, scale: displayScale)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                LinearGradient(
+                    colors: [.purple.opacity(0.75), AppTheme.accent.opacity(0.65)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.34, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .task(id: "\(url?.absoluteString ?? "")#\(pixelSize)") { await load() }
+    }
+
+    private var pixelSize: Int {
+        Int((size * displayScale).rounded(.up))
+    }
+
+    /// Already-decoded artwork renders on the first frame instead of flashing the placeholder.
+    private var currentImage: CGImage? {
+        guard let url else { return nil }
+        if let loaded, loaded.url == url, loaded.pixelSize == pixelSize { return loaded.image }
+        return ArtworkCache.shared.cachedImage(for: url, pixelSize: pixelSize)
+    }
+
+    /// Keeps its own reference to the shown bitmap so a memory-cache eviction cannot blank it.
+    private func load() async {
+        guard let url else { return }
+        let pixelSize = pixelSize
+        if let loaded, loaded.url == url, loaded.pixelSize == pixelSize { return }
+        if let cached = ArtworkCache.shared.cachedImage(for: url, pixelSize: pixelSize) {
+            loaded = (url, pixelSize, cached)
+            return
+        }
+        guard let image = await ArtworkCache.shared.image(for: url, pixelSize: pixelSize),
+              !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            loaded = (url, pixelSize, image)
+        }
     }
 }
 
