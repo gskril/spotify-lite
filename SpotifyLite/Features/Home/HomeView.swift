@@ -7,8 +7,19 @@ struct HomeView: View {
     @State private var recentTracks: [SpotifyTrack] = []
     @State private var dayMix: [SpotifyTrack] = []
     @State private var playlists: [SpotifyPlaylistSummary] = []
-    @State private var isLoading = true
+    @State private var isLoading: Bool
     @State private var errorMessage: String?
+
+    init(environment: AppEnvironment, user: SpotifyUser) {
+        _environment = ObservedObject(wrappedValue: environment)
+        self.user = user
+        let cached = environment.browseCache.home?.value
+        let recentTracks = cached?.recentTracks ?? []
+        _recentTracks = State(initialValue: recentTracks)
+        _dayMix = State(initialValue: HomePersonalizer.dayMix(from: recentTracks, date: .now))
+        _playlists = State(initialValue: cached?.playlists ?? [])
+        _isLoading = State(initialValue: cached == nil)
+    }
 
     var body: some View {
         ScrollView {
@@ -282,10 +293,12 @@ struct HomeView: View {
         }
     }
 
-    private func load() { Task { await loadAsync() } }
+    private func load() { Task { await loadAsync(force: true) } }
 
-    private func loadAsync() async {
-        isLoading = true
+    /// Fresh cached data is reused without a request; stale data stays visible while it refreshes.
+    private func loadAsync(force: Bool = false) async {
+        if !force, environment.browseCache.home?.isFresh() == true { return }
+        isLoading = recentTracks.isEmpty && playlists.isEmpty
         errorMessage = nil
         do {
             async let loadedTracks = environment.api.recentlyPlayed()
@@ -294,6 +307,7 @@ struct HomeView: View {
             recentTracks = HomePersonalizer.uniqueTracks(tracks)
             playlists = userPlaylists
             dayMix = HomePersonalizer.dayMix(from: recentTracks, date: .now)
+            environment.browseCache.home = Cached(HomeSnapshot(recentTracks: recentTracks, playlists: playlists))
         } catch {
             errorMessage = error.localizedDescription
         }

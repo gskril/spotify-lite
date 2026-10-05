@@ -77,6 +77,8 @@ user-read-recently-played
 - [x] Background-click dismissal for playlist and generated-mix overlays.
 - [x] `Space`, `Command-1`…`Command-4`, `Command-L`, native menus, and hardware media controls.
 - [x] Release artwork decoding sized for its display to reduce memory use.
+- [x] Shared artwork cache: decoded at display pixel size, bounded in memory, and backed by a 100 MB disk cache.
+- [x] Session cache for Home and Library: reused for 15 minutes across destination switches, shown while stale data refreshes, and cleared on sign-out.
 - [x] Main-window reopening and off-screen/invalid-window recovery.
 
 ## 4. Deliberate current behavior
