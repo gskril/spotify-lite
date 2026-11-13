@@ -5,6 +5,8 @@ struct NowPlayingBar: View {
     @State private var showingPlayer = false
     @State private var showingDevices = false
     @State private var showingQueue = false
+    @State private var showingVolume = false
+    @State private var volume: Double = 100
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +36,7 @@ struct NowPlayingBar: View {
             Spacer()
             HStack(spacing: 14) {
                 queueButton
+                volumeButton
                 deviceStatus
             }
             .frame(width: 220, alignment: .trailing)
@@ -47,6 +50,7 @@ struct NowPlayingBar: View {
             Spacer(minLength: 4)
             playbackControls
             queueButton
+            volumeButton
             devicePickerButton(compact: true)
         }
     }
@@ -98,6 +102,34 @@ struct NowPlayingBar: View {
         }
     }
 
+    private var deviceVolume: Int? { environment.playback?.device?.volumePercent }
+
+    private var volumeButton: some View {
+        Button { showingVolume.toggle() } label: {
+            Image(systemName: (deviceVolume ?? 100) == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(showingVolume ? AppTheme.accent : .secondary)
+        .disabled(track == nil || environment.playback?.device?.supportsVolume == false)
+        .help(deviceVolume.map { "Volume: \($0)%" } ?? "Volume")
+        .accessibilityLabel("Volume")
+        .popover(isPresented: $showingVolume, arrowEdge: .bottom) {
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.fill")
+                Slider(value: $volume, in: 0...100) { editing in
+                    if !editing { environment.setVolume(Int(volume)) }
+                }
+                .frame(width: 180)
+                .accessibilityLabel("Volume")
+                Image(systemName: "speaker.wave.3.fill")
+                Text("\(Int(volume))%").monospacedDigit().frame(width: 40, alignment: .trailing)
+            }
+            .foregroundStyle(.secondary)
+            .padding(14)
+            .onAppear { volume = Double(deviceVolume ?? 100) }
+        }
+    }
+
     @ViewBuilder private var deviceStatus: some View {
         if environment.isStartingPlayback {
             HStack(spacing: 7) {
@@ -139,7 +171,7 @@ struct NowPlayingBar: View {
 
     private var track: SpotifyTrack? { environment.playback?.item }
     private var isPlaying: Bool { environment.playback?.isPlaying == true }
-    private var receiverReady: Bool { if case .running = environment.spotifydState { return true }; return false }
+    private var receiverReady: Bool { if case .running = environment.receiverState { return true }; return false }
     private var playerSubtitle: String {
         if environment.isStartingPlayback { return "Connecting to this Mac…" }
         return receiverReady ? "Choose something to play" : "Start the local receiver in Settings"

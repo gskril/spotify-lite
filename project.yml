@@ -31,6 +31,7 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
         INFOPLIST_KEY_NSHumanReadableCopyright: "Personal, noncommercial Spotify client"
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Spotify Lite's local receiver is paired by choosing it in a Spotify app on your network."
         INFOPLIST_KEY_NSSupportsAutomaticGraphicsSwitching: YES
         INFOPLIST_KEY_NSQuitAlwaysKeepsWindows: NO
         INFOPLIST_KEY_ApplePersistenceIgnoreState: YES

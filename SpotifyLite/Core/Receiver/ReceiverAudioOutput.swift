@@ -69,7 +69,7 @@ private final class CoreAudioDefaultOutputObserver: @unchecked Sendable {
     }
 }
 
-struct SpotifydAudioOutputDevice: Identifiable, Hashable, Sendable {
+struct ReceiverAudioOutputDevice: Identifiable, Hashable, Sendable {
     let id: AudioDeviceID
     let name: String
     let outputChannels: Int
@@ -77,13 +77,13 @@ struct SpotifydAudioOutputDevice: Identifiable, Hashable, Sendable {
     let isBuiltIn: Bool
 }
 
-enum SpotifydAudioOutput {
-    static func availableDevices() -> [SpotifydAudioOutputDevice] {
+enum ReceiverAudioOutput {
+    static func availableDevices() -> [ReceiverAudioOutputDevice] {
         let defaultID = defaultOutputDeviceID()
         return allDeviceIDs().compactMap { id in
             let channels = outputChannelCount(for: id)
             guard channels > 0, let name = deviceName(for: id), !name.isEmpty else { return nil }
-            return SpotifydAudioOutputDevice(
+            return ReceiverAudioOutputDevice(
                 id: id,
                 name: name,
                 outputChannels: channels,
@@ -98,7 +98,7 @@ enum SpotifydAudioOutput {
         }
     }
 
-    static func statusDescription(from devices: [SpotifydAudioOutputDevice] = availableDevices()) -> String {
+    static func statusDescription(from devices: [ReceiverAudioOutputDevice] = availableDevices()) -> String {
         return devices.first(where: \.isDefault)?.name ?? "System default"
     }
 

@@ -1,6 +1,6 @@
 # Spotify Lite
 
-Spotify Lite is a lightweight native macOS Spotify client. SwiftUI provides the browsing and control interface, the Spotify Web API supplies account and playback data, and a user-installed [`spotifyd`](https://github.com/Spotifyd/spotifyd) process provides local audio.
+Spotify Lite is a lightweight native macOS Spotify client. SwiftUI provides the browsing and control interface, the Spotify Web API supplies account and playback data, and a user-installed [Spotify Soloist](https://developer.spotify.com/documentation/soloist) process, Spotify's official headless Connect player, provides local audio.
 
 This is an experimental personal, noncommercial project. It is not affiliated with or endorsed by Spotify.
 
@@ -19,7 +19,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 - Artwork is decoded once at its displayed size and kept in a bounded memory cache, so scrolling back or switching views does not refetch it.
 - Five-second playback reconciliation while active, and fifteen-second reconciliation during local background playback so recovery retains a recent track. Idle background sessions do not poll. Progress is interpolated locally.
 - Startup restores Spotify's current session, or shows Spotify Lite's last known track as paused when no device has an active session. Account history is used only when the app has not remembered a track yet.
-- Lightweight, session-long supervision of one app-owned `spotifyd` child process with private configuration, automatic Connect-session recovery, bounded redacted logs, and graceful shutdown.
+- Lightweight, session-long supervision of one app-owned Soloist child process with a private data directory, relaunch after unexpected exits, bounded redacted logs, and graceful shutdown.
 
 The app is source-built and unsigned. It is not currently packaged, notarized, or distributed as a finished consumer application.
 
@@ -30,7 +30,8 @@ To use the app:
 - macOS 15 or newer.
 - Spotify Premium.
 - A Spotify Developer app in Development Mode.
-- [`spotifyd`](https://github.com/Spotifyd/spotifyd), normally installed with `brew install spotifyd`.
+- An Apple Silicon Mac. Soloist has no Intel macOS build.
+- [Spotify Soloist](https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates), downloaded from Spotify, and a personal Soloist API key from the Spotify Developer Dashboard. Spotify does not allow the binary to be bundled or redistributed.
 
 To build from source:
 
@@ -40,9 +41,9 @@ To build from source:
 Spotify Lite intentionally uses two independent authorizations:
 
 1. Spotify Lite authorizes with the Web API to browse the account and control Spotify Connect.
-2. `spotifyd` authorizes separately to act as the local audio receiver.
+2. Soloist pairs separately, through Spotify Connect, to act as the local audio receiver.
 
-Both are required for standalone local playback. Web API authorization alone can browse and control another active Spotify device; `spotifyd` authorization alone does not give the Swift app access to library or player APIs. Spotify Lite never asks for a client secret and never reads `spotifyd`'s credential contents.
+Both are required for standalone local playback. Web API authorization alone can browse and control another active Spotify device; Soloist pairing alone does not give the Swift app access to library or player APIs. Spotify Lite never asks for a client secret and never reads Soloist's stored session.
 
 ## Spotify Developer setup
 
@@ -62,7 +63,7 @@ Development Mode only exposes playlist items for playlists the signed-in user ow
 ## Build and run
 
 ```sh
-brew install xcodegen spotifyd
+brew install xcodegen
 ./Scripts/build.sh
 ./Scripts/run.sh
 ```
@@ -72,9 +73,10 @@ brew install xcodegen spotifyd
 After the first launch:
 
 1. Confirm Premium and connect Spotify with the Developer client ID.
-2. Open Settings and select **Authenticate** under Local receiver.
-3. Complete the separate `spotifyd` browser authorization.
-4. Leave Spotify Lite open. Its local receiver stays available in the background and stops when the app quits.
+2. Open Settings. Under Local receiver, download Soloist, unpack it, and move the `soloist` file into the folder that **Open Folder** shows (`~/Library/Application Support/SpotifyLite/Soloist/`). Choose **Recheck**.
+3. Generate a Soloist API key in the Spotify Developer Dashboard, paste it, and choose **Save**.
+4. Choose **Pair**, then pick this Mac's "Spotify Lite" device in the device picker of a Spotify app on the same network. A VPN that blocks local network access hides the device until it is paused or allows LAN access.
+5. Leave Spotify Lite open. Its local receiver stays available in the background and stops when the app quits.
 
 The project uses filesystem-synchronized groups. Add Swift files under `SpotifyLite/` or tests under `SpotifyLiteTests/`, then run `xcodegen generate` or the build script. Do not hand-edit generated project entries for normal source additions.
 
@@ -93,21 +95,22 @@ Navigation and playback actions are also available in the app's native menus. Th
 - Queue display is read-only. Spotify's Web API can append an item but cannot remove or arbitrarily reorder the current playback queue; Spotify Lite does not yet expose an append action.
 - Podcasts, audiobooks, local files, offline downloads, lyrics, playlist editing, and Spotify's private Home recommendation feed are out of scope.
 - Albums are browsable from Library and Search, but selecting an album currently starts its context rather than opening an album-track detail screen.
-- `spotifyd` is an unofficial GPL-3.0 client based on the reverse-engineered `librespot` protocol. Spotify changes can break local playback.
-- Known receiver connection losses can briefly interrupt playback while automatic recovery restores it. See the [incident and upstream tracking notes](docs/playback-interruption-2026-09-17.md#known-issue-and-upstream-tracking). Use released spotifyd updates when an applicable fix becomes available; no local receiver patch is planned.
+- Each Soloist build stops working 90 days after its build date. Settings shows the date; download the current build from Spotify and replace the old file before then.
+- Soloist accepts its API key only as a command-line argument, so the key is visible to other processes of the same macOS user while the receiver runs.
+- The earlier `spotifyd` receiver interrupted playback when Spotify reset its session; see the [investigation notes](docs/playback-interruption-2026-09-17.md). Whether Soloist avoids this over long sessions has not been measured yet.
 - A formal long-duration playback, crash-recovery, and multi-output-device release matrix is still outstanding.
 
 ## Privacy and storage
 
 - Spotify Web API access and refresh tokens are stored in Keychain.
 - The public client ID, last displayed track, and non-secret preferences are stored in `UserDefaults`.
-- Generated configuration, `spotifyd` credentials/cache metadata, and bounded logs live under `~/Library/Application Support/SpotifyLite/`.
-- Audio-file caching is disabled so an interrupted download cannot poison a later playback session.
+- The Soloist API key is stored in Keychain.
+- The Soloist executable, its paired session (`soloist-data/`), its audio cache (`soloist-cache/`, capped at 1 GB), and bounded logs live under `~/Library/Application Support/SpotifyLite/`.
 - Downloaded artwork is cached in `~/Library/Caches/SpotifyLite/Artwork/`, capped at 100 MB. Home and Library data is cached in memory only and cleared on sign-out.
 - `Logs/app.jsonl` records app lifecycle, media-key input, playback commands and positions, API paths/status/timing, recovery decisions, and redacted receiver output. Records have UTC timestamps, session IDs, and sequence numbers. It appends across launches and rotates at 4 MB with eight archives (about 36 MB total); writes run on a utility queue. Logs contain listening history, but omit request/response bodies, headers, tokens, and search queries.
-- `Logs/spotifyd.log` also retains receiver output, rotating at approximately 512 KB with one archive. Log directories/files use owner-only permissions.
+- `Logs/soloist.log` also retains receiver output, rotating at approximately 512 KB with one archive. Log directories/files use owner-only permissions.
 - To follow diagnostics: `tail -F ~/Library/"Application Support"/SpotifyLite/Logs/app.jsonl`. Closing the app stops recording; queued records flush on orderly quit. Logs survive ordinary process exits, but pending asynchronous records can be lost on a crash or power failure.
-- OAuth codes, tokens, PKCE values, callback parameters, and `spotifyd` credentials must never be committed or written to diagnostics.
+- OAuth codes, tokens, PKCE values, callback parameters, the Soloist API key, and Soloist session files must never be committed or written to diagnostics.
 
 ## Project documentation
 

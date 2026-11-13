@@ -32,9 +32,15 @@ final class AppEnvironment: ObservableObject {
             if case .ready(let user) = sessionState {
                 playbackMemoryStore.save(playback, for: user.id)
             }
+            // The receiver is relaunched at this volume instead of Soloist's 40% default.
+            if let device = playback?.device, device.name == SoloistSupervisorConfiguration.defaultDeviceName,
+               let volume = device.volumePercent,
+               volume != UserDefaults.standard.object(forKey: SoloistSupervisorConfiguration.rememberedVolumeKey) as? Int {
+                UserDefaults.standard.set(volume, forKey: SoloistSupervisorConfiguration.rememberedVolumeKey)
+            }
         }
     }
-    @Published private(set) var spotifydState: SpotifydState = .stopped
+    @Published private(set) var receiverState: ReceiverState = .stopped
     @Published var alertMessage: String?
     @Published var presentedPlaylist: SpotifyPlaylistSummary?
     @Published var presentedGeneratedMix: GeneratedMixPresentation?
@@ -43,7 +49,7 @@ final class AppEnvironment: ObservableObject {
 
     let authorizer: any SpotifyAuthorizing
     let api: any SpotifyAPIProviding
-    let spotifyd: any SpotifydManaging
+    let receiverManager: any ReceiverManaging
     let playbackCoordinator: PlaybackCoordinator
     let browseCache = BrowseCache()
     private let systemMediaController = SystemMediaController()
@@ -53,13 +59,13 @@ final class AppEnvironment: ObservableObject {
     init(
         authorizer: any SpotifyAuthorizing,
         api: any SpotifyAPIProviding,
-        spotifyd: any SpotifydManaging,
+        receiverManager: any ReceiverManaging,
         playbackCoordinator: PlaybackCoordinator,
         playbackMemoryStore: PlaybackMemoryStore = .init()
     ) {
         self.authorizer = authorizer
         self.api = api
-        self.spotifyd = spotifyd
+        self.receiverManager = receiverManager
         self.playbackCoordinator = playbackCoordinator
         self.playbackMemoryStore = playbackMemoryStore
     }
@@ -207,21 +213,21 @@ final class AppEnvironment: ObservableObject {
         playback = await playbackCoordinator.currentPlayback()
     }
 
-    /// Starts the receiver and keeps it alive, optionally stopping it first. `spotifydState`
+    /// Starts the receiver and keeps it alive, optionally stopping it first. `receiverState`
     /// follows the supervisor's events; this only surfaces the error.
     func startReceiver(restart: Bool = false) async throws {
-        if restart { await spotifyd.stop() }
-        try await spotifyd.startKeepingAlive()
+        if restart { await receiverManager.stop() }
+        try await receiverManager.startKeepingAlive()
     }
 
     /// Mirrors receiver state and forwards receiver events to playback for the app's lifetime.
     func observeReceiver() async {
         // Subscribe before inspecting so the installation state it reports is not missed.
-        let events = spotifyd.events
-        _ = await spotifyd.inspectInstallation()
+        let events = receiverManager.events
+        _ = await receiverManager.inspectInstallation()
         for await event in events {
             guard !Task.isCancelled else { return }
-            if case .stateChanged(let state) = event { spotifydState = state }
+            if case .stateChanged(let state) = event { receiverState = state }
             await playbackCoordinator.handleReceiverEvent(event)
         }
     }

@@ -3,7 +3,7 @@ import AppKit
 
 @MainActor
 final class SpotifyLiteAppDelegate: NSObject, NSApplicationDelegate {
-    var spotifyd: (any SpotifydManaging)?
+    var receiverManager: (any ReceiverManaging)?
     private var terminationPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,10 +47,10 @@ final class SpotifyLiteAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminationPending else { return .terminateLater }
-        guard let spotifyd else { return .terminateNow }
+        guard let receiverManager else { return .terminateNow }
         terminationPending = true
         Task {
-            await spotifyd.stopKeepingAlive()
+            await receiverManager.stopKeepingAlive()
             DiagnosticLog.shared.record("app.terminated")
             DiagnosticLog.shared.flush()
             sender.reply(toApplicationShouldTerminate: true)
@@ -69,19 +69,19 @@ struct SpotifyLiteApp: App {
         let clientIDStore = SpotifyClientIDStore()
         let authorizer = SpotifyAuthorizer(clientIDStore: clientIDStore)
         let api = SpotifyAPIClient(authorizer: authorizer)
-        let spotifyd = SpotifydSupervisor()
+        let receiverManager = SoloistSupervisor()
         let playbackCoordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: spotifyd,
-            receiverName: SpotifydSupervisorConfiguration.defaultDeviceName
+            receiverManager: receiverManager,
+            receiverName: SoloistSupervisorConfiguration.defaultDeviceName
         )
         _environment = StateObject(wrappedValue: AppEnvironment(
             authorizer: authorizer,
             api: api,
-            spotifyd: spotifyd,
+            receiverManager: receiverManager,
             playbackCoordinator: playbackCoordinator
         ))
-        appDelegate.spotifyd = spotifyd
+        appDelegate.receiverManager = receiverManager
     }
 
     var body: some Scene {

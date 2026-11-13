@@ -9,7 +9,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
             progressMS: 23_663, isPlaying: true, device: device,
             shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [[]], playbackResponses: [playing])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(),
             receiverName: device.name, configuration: .init(refreshAfterCommands: false))
         _ = try await coordinator.refresh()
         await coordinator.receiverWillRestart()
@@ -27,7 +27,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
             shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [[device], [device]], playbackResponses: [playing, nil],
             operationDelay: .milliseconds(100), pauseError: .http(status: 404, reason: nil, message: "No active device"))
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(),
             receiverName: device.name, configuration: .init(refreshAfterCommands: false))
         _ = try await coordinator.refresh()
         let pause = Task { try await coordinator.pause() }
@@ -48,7 +48,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
             shuffle: false, repeatMode: .off, contextURI: "spotify:playlist:changed")
         let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [paused, nil],
             operationDelay: .milliseconds(100))
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(),
             receiverName: device.name, configuration: .init(refreshAfterCommands: false))
         _ = try await coordinator.refresh()
         let first = Task { try await coordinator.play() }
@@ -57,57 +57,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         try await first.value
         let calls = await api.calls
         XCTAssertEqual(calls.filter { $0.hasPrefix("play:") }.count, 1)
-    }
-
-    func testMissingPlaylistOffsetRestoresExactTrackOnce() async throws {
-        let device = makeDevice(id: "local", active: true)
-        let paused = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
-            progressMS: 23_663, isPlaying: false, device: device,
-            shuffle: false, repeatMode: .off, contextURI: "spotify:playlist:changed")
-        let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [paused, nil],
-            operationDelay: .milliseconds(50))
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
-            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
-        _ = try await coordinator.refresh()
-        let first = Task { try await coordinator.play() }
-        try await waitForAPICall(api, prefix: "play:")
-        let warning = "Failed to resolve index by Some(Uri(\"spotify:track:saved\")), using fallback index: None (Error: could not find track None in context of 50)"
-        await coordinator.receiverLog(warning)
-        try await first.value
-        await coordinator.receiverLog(warning)
-        let calls = await api.calls
-        XCTAssertEqual(calls.filter { $0.hasPrefix("play:") }, [
-            "play:local:context(spotify:playlist:changed)@23663",
-            "play:local:uris(spotify:track:saved)@23663"
-        ])
-        let restored = await coordinator.currentPlayback()
-        XCTAssertEqual(restored?.item?.uri, "spotify:track:saved")
-        XCTAssertNil(restored?.contextURI)
-    }
-
-    func testMissingOffsetWarningAfterPauseDoesNotRestartPlayback() async throws {
-        let device = makeDevice(id: "local", active: true)
-        let paused = PlaybackState(item: makeTrack(id: "saved", name: "Saved"),
-            progressMS: 23_663, isPlaying: false, device: device,
-            shuffle: false, repeatMode: .off, contextURI: "spotify:playlist:changed")
-        let api = PlaybackAPISpy(deviceResponses: [[device], [device]], playbackResponses: [paused, nil])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
-            receiverName: device.name, configuration: .init(refreshAfterCommands: false))
-        _ = try await coordinator.refresh()
-        try await coordinator.play()
-        try await coordinator.pause()
-        await coordinator.receiverLog("Failed to resolve index by Some(Uri(\"spotify:track:saved\")), using fallback index: None (Error: could not find track None in context of 50)")
-        let calls = await api.calls
-        XCTAssertEqual(calls.filter { $0.hasPrefix("play:") }.count, 1)
-        let state = await coordinator.currentPlayback()
-        XCTAssertEqual(state?.isPlaying, false)
-    }
-
-    func testContextOffsetParserIgnoresPreloadingAndOtherTracks() {
-        XCTAssertNil(PlaybackCoordinator.unresolvedContextTrack(in: "Loading spotify:track:saved"))
-        XCTAssertNil(PlaybackCoordinator.unresolvedContextTrack(in: "could not find track"))
-        XCTAssertNil(PlaybackCoordinator.unresolvedContextTrack(in:
-            "Failed to resolve index by Some(Uri(\"spotify:album:saved\")): could not find track"))
     }
 
     func testPausePreservesElapsedPositionBetweenPolls() async throws {
@@ -116,7 +65,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
                                     progressMS: 20_000, isPlaying: true, device: device,
                                     shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [initial])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(),
             receiverName: device.name, configuration: .init(refreshAfterCommands: false))
         _ = try await coordinator.refresh()
         try await Task.sleep(for: .milliseconds(60))
@@ -137,7 +86,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
                                     progressMS: 20_000, isPlaying: true, device: device,
                                     shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [initial])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(), receiverName: device.name)
         _ = try await coordinator.refresh()
         try await Task.sleep(for: .milliseconds(60))
         let beforeShuffle = await coordinator.currentPlayback()
@@ -157,7 +106,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac"
         )
 
@@ -192,7 +141,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac"
         )
 
@@ -213,7 +162,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac"
         )
         let remembered = PlaybackState(
@@ -261,10 +210,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
                 nil
             ]
         )
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: oldDevice.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -302,7 +251,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let state = PlaybackState(item: track, progressMS: 20_000, isPlaying: true,
                                   device: device, shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [state, nil, nil])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(), receiverName: device.name)
         _ = try await coordinator.refresh()
         await coordinator.receiverWillRestart()
         _ = try await coordinator.refresh()
@@ -322,7 +271,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
                 progressMS: 27_000, isPlaying: true, device: device,
                 shuffle: false, repeatMode: .off)
             let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [state, state])
-            let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(),
+            let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(),
                 receiverName: device.name, configuration: .init(refreshAfterCommands: false))
             _ = try await coordinator.refresh()
             if !restartDirectly { await coordinator.receiverWillRestart() }
@@ -344,7 +293,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         var remote = state
         remote.device = other
         let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [state, remote])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(), receiverName: device.name)
         _ = try await coordinator.refresh()
         await coordinator.receiverWillRestart()
         await coordinator.receiverConnectionInterrupted()
@@ -363,7 +312,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let live = PlaybackState(item: makeTrack(id: "live", name: "Live"), progressMS: 8_000,
                                  isPlaying: true, device: device, shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [[device]], playbackResponses: [old, live])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name)
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(), receiverName: device.name)
         _ = try await coordinator.refresh()
         await coordinator.receiverConnectionInterrupted()
         try await waitForPlaybackCalls(api, count: 2)
@@ -386,10 +335,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
             playbackResponses: [nil],
             recentlyPlayedTracks: [recent]
         )
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: receiver.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -443,10 +392,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
             deviceResponses: [[device]],
             playbackResponses: [state]
         )
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: "Spotify Lite — Test Mac",
             configuration: .init(refreshAfterCommands: false)
         )
@@ -466,6 +415,47 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(playback?.item, current)
         XCTAssertEqual(playback?.device, device)
         XCTAssertEqual(playback?.isPlaying, true)
+    }
+
+    func testRestoreReplaysFromAlbumWhenTheContextDoesNotStartTheTrack() async throws {
+        let track = makeTrack(id: "stray", name: "Stray", albumURI: "spotify:album:home")
+        let receiver = makeDevice(id: "local", active: false)
+        // Spotify accepts the playlist request but never reports the track playing.
+        let api = PlaybackAPISpy(
+            deviceResponses: [[receiver]],
+            playbackResponses: [PlaybackState(
+                item: track,
+                progressMS: 61_000,
+                isPlaying: false,
+                device: nil,
+                shuffle: false,
+                repeatMode: .off,
+                contextURI: "spotify:playlist:elsewhere"
+            )]
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            receiverManager: ReceiverManagerSpy(),
+            receiverName: receiver.name,
+            configuration: .init(
+                receiverDiscoveryTimeout: .seconds(1),
+                initialDiscoveryDelay: .milliseconds(1),
+                maximumDiscoveryDelay: .milliseconds(5),
+                refreshAfterCommands: false,
+                restoreVerificationDelay: .milliseconds(1)
+            )
+        )
+
+        _ = try await coordinator.refresh()
+        try await coordinator.play()
+
+        let plays = await api.calls.filter { $0.hasPrefix("play:") }
+        let playback = await coordinator.currentPlayback()
+        XCTAssertEqual(plays, [
+            "play:local:context(spotify:playlist:elsewhere)@61000",
+            "play:local:context(spotify:album:home)@61000"
+        ])
+        XCTAssertEqual(playback?.contextURI, "spotify:album:home")
     }
 
     func testPlayFallsBackToLocalReceiverWhenRememberedRemoteDeviceIsGone() async throws {
@@ -496,10 +486,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
                 repeatMode: .off
             )]
         )
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: receiver.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -529,10 +519,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
     func testLocalPlayUsesExplicitDeviceWithoutTransfer() async throws {
         let inactive = makeDevice(id: "local-v1", active: false)
         let api = PlaybackAPISpy(deviceResponses: [[inactive], [inactive]])
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: inactive.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -594,7 +584,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: device.name
         )
 
@@ -636,10 +626,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let inactive = makeDevice(id: "local-v1", active: false)
         let active = makeDevice(id: "local-v1", active: true)
         let api = PlaybackAPISpy(deviceResponses: [[inactive], [active]])
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: inactive.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -665,10 +655,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
     func testReceiverResolutionReplacesStaleDeviceID() async throws {
         let api = PlaybackAPISpy(deviceResponses: [[makeDevice(id: "fresh", active: true)]])
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: "Spotify Lite — Test Mac",
             configuration: .init(refreshAfterCommands: false)
         )
@@ -683,7 +673,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let api = PlaybackAPISpy(deviceResponses: [[makeDevice(id: "fresh", active: true)]])
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac"
         )
 
@@ -697,7 +687,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let api = PlaybackAPISpy(deviceResponses: [[makeDevice(id: "active", active: true)]])
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac",
             configuration: .init(refreshAfterCommands: false)
         )
@@ -734,10 +724,10 @@ final class PlaybackCoordinatorTests: XCTestCase {
             deviceResponses: [[fresh]],
             playbackResponses: [paused, nil, nil, paused, confirmed]
         )
-        let daemon = SpotifydManagerSpy()
+        let daemon = ReceiverManagerSpy()
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: daemon,
+            receiverManager: daemon,
             receiverName: stale.name,
             configuration: .init(
                 receiverDiscoveryTimeout: .seconds(1),
@@ -791,7 +781,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac",
             configuration: .init(refreshAfterCommands: false)
         )
@@ -811,7 +801,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let api = PlaybackAPISpy(deviceResponses: [[makeDevice(id: "fresh", active: true)]])
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac",
             configuration: .init(refreshAfterCommands: false)
         )
@@ -829,7 +819,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let second = PlaybackState(item: makeTrack(id: "second", name: "Second"), progressMS: 1_000,
                                    isPlaying: true, device: device, shuffle: false, repeatMode: .off)
         let api = PlaybackAPISpy(deviceResponses: [], playbackResponses: [first, second])
-        let coordinator = PlaybackCoordinator(api: api, spotifyd: SpotifydManagerSpy(), receiverName: device.name,
+        let coordinator = PlaybackCoordinator(api: api, receiverManager: ReceiverManagerSpy(), receiverName: device.name,
             configuration: .init(backgroundRefreshInterval: .milliseconds(25)))
         _ = try await coordinator.refresh()
         await coordinator.setObservationActivity(.hidden)
@@ -843,7 +833,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let api = PlaybackAPISpy(deviceResponses: [])
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac",
             configuration: .init(
                 activeRefreshInterval: .milliseconds(25),
@@ -902,7 +892,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: current.name,
             configuration: .init(refreshAfterCommands: false)
         )
@@ -937,7 +927,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: PlaybackAPISpy(deviceResponses: []),
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: "Spotify Lite — Test Mac"
         )
 
@@ -987,7 +977,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
         let coordinator = PlaybackCoordinator(
             api: api,
-            spotifyd: SpotifydManagerSpy(),
+            receiverManager: ReceiverManagerSpy(),
             receiverName: current.name,
             configuration: .init(
                 receiverActivationTimeout: .milliseconds(10),
@@ -1083,11 +1073,11 @@ final class PlaybackCoordinatorTests: XCTestCase {
     }
 }
 
-private actor SpotifydManagerSpy: SpotifydManaging {
-    nonisolated let events = AsyncStream<SpotifydEvent> { _ in }
+private actor ReceiverManagerSpy: ReceiverManaging {
+    nonisolated let events = AsyncStream<ReceiverEvent> { _ in }
     private(set) var calls: [String] = []
 
-    func inspectInstallation() async -> SpotifydInstallation {
+    func inspectInstallation() async -> ReceiverInstallation {
         .init(executableURL: URL(fileURLWithPath: "/fixture/spotifyd"), version: "fixture")
     }
 
@@ -1196,9 +1186,11 @@ private extension PlaybackCoordinatorConfiguration {
         initialDiscoveryDelay: Duration = .milliseconds(250),
         maximumDiscoveryDelay: Duration = .seconds(2),
         activeRefreshInterval: Duration = .seconds(3),
-        refreshAfterCommands: Bool = true
+        refreshAfterCommands: Bool = true,
+        restoreVerificationDelay: Duration? = nil
     ) {
         self.init()
+        self.restoreVerificationDelay = restoreVerificationDelay
         self.receiverDiscoveryTimeout = receiverDiscoveryTimeout
         self.receiverActivationTimeout = receiverActivationTimeout
         self.initialDiscoveryDelay = initialDiscoveryDelay

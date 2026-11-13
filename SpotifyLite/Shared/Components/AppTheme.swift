@@ -19,7 +19,7 @@ extension View {
 }
 
 
-extension SpotifydState {
+extension ReceiverState {
     /// The status dot colour used wherever the receiver state is shown.
     var indicatorColor: Color {
         switch self {
