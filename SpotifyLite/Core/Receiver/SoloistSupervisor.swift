@@ -63,6 +63,9 @@ actor SoloistSupervisor: ReceiverManaging {
     private var keepAliveRestartTask: Task<Void, Never>?
     private var audioOutputObservationTask: Task<Void, Never>?
     private var pairingAdvertisement: Process?
+    /// Pairing runs verbose and names the account, so their output must never be stored,
+    /// including data that arrives after the pairing child has been cleared.
+    private var pairingChildIdentifiers: Set<UUID> = []
     private let apiKey: @Sendable () async -> String?
     private let defaultAudioOutputChanges: @Sendable () -> AsyncStream<Void>
 
@@ -135,6 +138,7 @@ actor SoloistSupervisor: ReceiverManaging {
             arguments: baseArguments(apiKey: key) + ["--pair", "--verbose"],
             isAuthentication: true
         )
+        pairingChildIdentifiers.insert(launched.identifier)
         child = launched
         stopWasRequested = false
         defer { stopPairingAdvertisement() }
@@ -357,6 +361,8 @@ actor SoloistSupervisor: ReceiverManaging {
     }
 
     private func receive(_ data: Data, from source: OutputSource, childIdentifier: UUID) {
+        // Pairing output is only scanned while that child is current; late data is dropped.
+        if pairingChildIdentifiers.contains(childIdentifier), child?.identifier != childIdentifier { return }
         guard child?.identifier == childIdentifier || child == nil else { return }
         if data.isEmpty {
             flushBuffer(source)
