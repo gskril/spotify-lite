@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var isConnecting = false
     @State private var errorMessage: String?
+    @State private var didCancelConnect = false
 
     var body: some View {
         ZStack {
@@ -128,8 +129,15 @@ struct OnboardingView: View {
             }
 
             HStack {
-                Button("Back") { step = 1 }
-                    .disabled(isConnecting)
+                if isConnecting {
+                    // Closing the browser tab never reaches the app, so offer a way out.
+                    Button("Cancel") {
+                        didCancelConnect = true
+                        Task { try? await environment.authorizer.signOut() }
+                    }
+                } else {
+                    Button("Back") { step = 1 }
+                }
                 Spacer()
                 Button {
                     connect()
@@ -170,20 +178,38 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
+    /// Reuses saved tokens when they still work, for example after an offline launch, and
+    /// opens the browser only when Spotify actually requires a new authorization.
+    private func signedInUser() async throws -> SpotifyUser {
+        do {
+            _ = try await environment.authorizer.validAccessToken()
+            return try await environment.api.currentUser()
+        } catch let error as SpotifyAuthorizationError where error.requiresReauthorization {
+        } catch SpotifyAPIError.unauthorized {
+        }
+        try await environment.authorizer.beginAuthorization()
+        return try await environment.api.currentUser()
+    }
+
     private func connect() {
         isConnecting = true
+        didCancelConnect = false
         errorMessage = nil
         environment.sessionState = .authorizing
         Task {
             do {
-                try await environment.authorizer.beginAuthorization()
-                let user = try await environment.api.currentUser()
+                let user = try await signedInUser()
                 await MainActor.run {
                     environment.sessionState = .ready(user)
                     isConnecting = false
                 }
             } catch {
                 await MainActor.run {
+                    if didCancelConnect {
+                        environment.sessionState = .needsSetup
+                        isConnecting = false
+                        return
+                    }
                     let message = error.localizedDescription
                     environment.sessionState = .failure(message)
                     errorMessage = message

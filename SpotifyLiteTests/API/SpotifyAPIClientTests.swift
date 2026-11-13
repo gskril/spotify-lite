@@ -177,19 +177,6 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.first?.url?.path, "/v1/me/playlists")
     }
 
-    func testLibraryMutationUsesNewUnifiedEndpointAndSpotifyURI() async throws {
-        let recorder = APIRequestRecorder(responses: [.init(status: 200, body: "")])
-        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
-        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
-
-        try await api.setSaved(trackID: "abc", saved: false)
-
-        let request = try XCTUnwrap(recorder.requests.first)
-        XCTAssertEqual(request.httpMethod, "DELETE")
-        XCTAssertEqual(request.url?.path, "/v1/me/library")
-        XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "spotify:track:abc")
-    }
-
     func testPlaybackQueueDecodesCurrentAndUpcomingTracksLossTolerantly() async throws {
         let body = #"{"currently_playing":{"id":"now","name":"Now","uri":"spotify:track:now","duration_ms":100,"explicit":false,"artists":[]},"queue":[{"id":"next","name":"Next","uri":"spotify:track:next","duration_ms":200,"explicit":false,"artists":[]},null,{"type":"episode"}]}"#
         let recorder = APIRequestRecorder(responses: [.init(status: 200, body: body)])

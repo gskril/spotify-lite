@@ -246,16 +246,6 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         )
     }
 
-    func setSaved(trackID: String, saved: Bool) async throws {
-        guard !trackID.isEmpty else { throw SpotifyAPIError.invalidRequest("A track ID is required.") }
-        try await send(Endpoint(
-            method: saved ? "PUT" : "DELETE",
-            path: "me/library",
-            query: [URLQueryItem(name: "uris", value: "spotify:track:\(trackID)")],
-            isMutation: true
-        ))
-    }
-
     private func playbackCommand(
         method: String,
         path: String,
@@ -351,15 +341,15 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         while true {
             try Task.checkCancellation()
             let request = try makeRequest(endpoint, token: token)
-            let requestID = UUID().uuidString
             let started = ContinuousClock.now
-            let fields = ["id": requestID, "method": endpoint.method,
-                          "path": request.url?.path ?? "unknown"]
-            DiagnosticLog.shared.record("api.request", fields)
+            let fields = ["method": endpoint.method, "path": request.url?.path ?? "unknown"]
             let data: Data
             let response: URLResponse
             do {
                 (data, response) = try await session.data(for: request)
+            } catch let error as URLError where error.code == .cancelled {
+                // URLSession reports task cancellation as URLError; callers expect CancellationError.
+                throw CancellationError()
             } catch {
                 DiagnosticLog.shared.record("api.transport_error", fields.merging([
                     "code": String((error as NSError).code),
@@ -367,10 +357,16 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
                 ]) { _, new in new })
                 throw error
             }
-            DiagnosticLog.shared.record("api.response", fields.merging([
-                "status": String((response as? HTTPURLResponse)?.statusCode ?? 0),
-                "duration": String(describing: started.duration(to: .now))
-            ]) { _, new in new })
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // A successful playback poll is already recorded as playback.applied.
+            let isRoutinePoll = endpoint.method == "GET" && endpoint.path == "me/player"
+                && (200..<300).contains(status)
+            if !isRoutinePoll {
+                DiagnosticLog.shared.record("api.response", fields.merging([
+                    "status": String(status),
+                    "duration": String(describing: started.duration(to: .now))
+                ]) { _, new in new })
+            }
             guard let http = response as? HTTPURLResponse else { throw SpotifyAPIError.invalidResponse }
 
             if http.statusCode == 401, !retriedUnauthorized {
@@ -387,7 +383,11 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
                     )
                 }
                 let retryAfter = retryAfterSeconds(from: http)
-                guard !endpoint.isMutation, rateLimitRetries < configuration.maximumRateLimitRetries else {
+                // A wait longer than the cap is the caller's to schedule; retrying early only
+                // extends the limit.
+                guard !endpoint.isMutation,
+                      rateLimitRetries < configuration.maximumRateLimitRetries,
+                      (retryAfter ?? 0) <= configuration.maximumRetryDelay else {
                     throw SpotifyAPIError.rateLimited(
                         retryAfter: retryAfter,
                         message: detail.message ?? "Spotify is receiving too many requests. Please try again shortly."
@@ -418,6 +418,8 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method
         request.httpBody = endpoint.body
+        // The default 60 s would hold the playback command gate behind one stalled request.
+        request.timeoutInterval = 15
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if endpoint.body != nil {

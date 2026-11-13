@@ -40,13 +40,17 @@ struct PlaybackCoordinatorConfiguration: Sendable {
     var receiverActivationTimeout: Duration = .seconds(8)
     var initialDiscoveryDelay: Duration = .milliseconds(250)
     var maximumDiscoveryDelay: Duration = .seconds(2)
-    var seekDebounceDelay: Duration = .milliseconds(180)
-    var volumeDebounceDelay: Duration = .milliseconds(180)
     var activeRefreshInterval: Duration = .seconds(5)
     var backgroundRefreshInterval: Duration = .seconds(15)
     var receiverRediscoveryTimeoutBeforeRestart: Duration = .seconds(3)
+    /// How often recovery looks for a receiver that was just relaunched. The listener hears
+    /// silence until it is found, so this stays short instead of backing off.
+    var restartedReceiverPollInterval: Duration = .milliseconds(100)
     var pendingTrackConfirmationTimeout: Duration = .seconds(12)
     var refreshAfterCommands: Bool = true
+    /// Polling pause after a 429 without a usable Retry-After, and after quota exhaustion.
+    var rateLimitedRefreshDelay: Duration = .seconds(60)
+    var quotaExceededRefreshDelay: Duration = .seconds(900)
 }
 
 private actor PlaybackCommandGate {
@@ -92,8 +96,6 @@ actor PlaybackCoordinator {
     private var observationActivity: PlaybackObservationActivity = .hidden
     private var reconciliationTask: Task<Void, Never>?
     private var recovery: ReceiverRecovery = .idle
-    private var pendingSeekTask: Task<Void, Never>?
-    private var pendingVolumeTask: Task<Void, Never>?
     private var isPlayRequestInFlight = false
     private var pendingRestoration: (id: UUID, snapshot: PlaybackState, device: SpotifyDevice)?
     private var pendingSelectedTrack: PendingTrack?
@@ -115,8 +117,6 @@ actor PlaybackCoordinator {
     deinit {
         reconciliationTask?.cancel()
         recovery.task?.cancel()
-        pendingSeekTask?.cancel()
-        pendingVolumeTask?.cancel()
     }
 
     func currentPlayback() -> PlaybackState? {
@@ -172,7 +172,6 @@ actor PlaybackCoordinator {
     @discardableResult
     func refresh() async throws -> PlaybackState? {
         let state = try await api.playbackState()
-        DiagnosticLog.shared.record("playback.observed", DiagnosticLog.playback(state))
         let decision = Self.reconcile(
             observed: state,
             held: serverPlayback,
@@ -188,6 +187,10 @@ actor PlaybackCoordinator {
         if decision.clearsPendingTrack {
             pendingSelectedTrack = nil
             pendingRestoration = nil
+        }
+        // An applied observation is logged by setPlayback; record only the ones held back.
+        if case .apply = decision.outcome {} else {
+            DiagnosticLog.shared.record("playback.observed", DiagnosticLog.playback(state))
         }
         switch decision.outcome {
         case .hold:
@@ -483,6 +486,8 @@ actor PlaybackCoordinator {
     func pause() async throws {
         DiagnosticLog.shared.record("command.pause", DiagnosticLog.playback(currentPlayback()))
         let isLocal = currentPlayback()?.device?.name == receiverName
+        // Captured before the optimistic pause below clears the playing flag.
+        let playingDevice = serverPlayback?.isPlaying == true ? serverPlayback?.device : nil
         // Record local pause intent before waiting for an in-flight Play. A receiver
         // restart during that wait must not capture a playing recovery snapshot.
         if isLocal {
@@ -494,7 +499,12 @@ actor PlaybackCoordinator {
         try await serialized {
             self.cancelReceiverRecovery()
             do {
-                let device = try await self.resolveCommandDevice()
+                let device: SpotifyDevice
+                if let playingDevice, playingDevice.isActive, playingDevice.id != nil {
+                    device = playingDevice
+                } else {
+                    device = try await self.resolveCommandDevice()
+                }
                 let deviceID = try Self.controllableID(of: device, name: self.receiverName)
                 try await self.optimistically(updating: { $0?.isPlaying = false }) {
                     try await self.api.pause(on: deviceID)
@@ -624,59 +634,17 @@ actor PlaybackCoordinator {
         }
     }
 
-    func seek(to milliseconds: Int, final: Bool = true) async throws {
-        DiagnosticLog.shared.record("command.seek", ["position_ms": String(milliseconds), "final": String(final)])
+    func seek(to milliseconds: Int) async throws {
+        DiagnosticLog.shared.record("command.seek", ["position_ms": String(milliseconds)])
         let value = max(0, milliseconds)
-        pendingSeekTask?.cancel()
-        pendingSeekTask = nil
-        if final {
-            try await performSeek(value)
-        } else {
-            optimisticallySetProgress(value)
-            let delay = configuration.seekDebounceDelay
-            pendingSeekTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: delay)
-                    try await self?.performSeek(value)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    await self?.reportFailure(error)
-                }
-            }
-        }
-    }
-
-    func setVolume(_ percent: Int, final: Bool = true) async throws {
-        DiagnosticLog.shared.record("command.setVolume", ["percent": String(percent), "final": String(final)])
-        let value = min(100, max(0, percent))
-        pendingVolumeTask?.cancel()
-        pendingVolumeTask = nil
-        if final {
-            try await performVolume(value)
-        } else {
-            optimisticallySetVolume(value)
-            let delay = configuration.volumeDebounceDelay
-            pendingVolumeTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: delay)
-                    try await self?.performVolume(value)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    await self?.reportFailure(error)
-                }
-            }
-        }
-    }
-
-    private func performSeek(_ value: Int) async throws {
         try await withReceiverCommand(optimistic: { $0?.progressMS = value }, refreshAfter: false) { deviceID in
             try await self.api.seek(to: value, on: deviceID)
         }
     }
 
-    private func performVolume(_ value: Int) async throws {
+    func setVolume(_ percent: Int) async throws {
+        DiagnosticLog.shared.record("command.setVolume", ["percent": String(percent)])
+        let value = min(100, max(0, percent))
         try await withReceiverCommand(optimistic: { $0?.device?.volumePercent = value }, refreshAfter: false) { deviceID in
             try await self.api.setVolume(value, on: deviceID)
         }
@@ -689,7 +657,7 @@ actor PlaybackCoordinator {
     ) async throws {
         cancelReceiverRecovery()
         try await serialized {
-            let device = try await self.resolveCommandDevice()
+            let device = try await self.transportDevice()
             let deviceID = try Self.controllableID(of: device, name: self.receiverName)
             try await self.optimistically(updating: optimistic) {
                 try await operation(deviceID)
@@ -735,6 +703,16 @@ actor PlaybackCoordinator {
             eventBus.send(.stateChanged(currentPlayback()))
             throw error
         }
+    }
+
+    /// The device for a transport control. While playing, the last poll (at most one refresh
+    /// interval old) already names it, which saves a device-list round trip per button press.
+    private func transportDevice() async throws -> SpotifyDevice {
+        if serverPlayback?.isPlaying == true,
+           let device = serverPlayback?.device, device.isActive, device.id != nil {
+            return device
+        }
+        return try await resolveCommandDevice()
     }
 
     private func resolveCommandDevice() async throws -> SpotifyDevice {
@@ -860,7 +838,10 @@ actor PlaybackCoordinator {
     }
 
     private func setPlayback(_ state: PlaybackState?) {
-        DiagnosticLog.shared.record("playback.applied", DiagnosticLog.playback(state))
+        // Identical paused or idle polls add nothing to the timeline.
+        if state != serverPlayback {
+            DiagnosticLog.shared.record("playback.applied", DiagnosticLog.playback(state))
+        }
         serverPlayback = state
         serverPlaybackTimestamp = clock.now
         eventBus.send(.stateChanged(state))
@@ -991,6 +972,9 @@ actor PlaybackCoordinator {
         DiagnosticLog.shared.record("recovery.started", DiagnosticLog.playback(snapshot))
         guard let track = snapshot.item else { return }
         let deadline = clock.now.advanced(by: configuration.receiverDiscoveryTimeout)
+        // A relaunched receiver normally registers within about a second. Poll quickly for
+        // that window; back off only once it is clearly taking longer.
+        let fastPollingDeadline = clock.now.advanced(by: configuration.receiverRediscoveryTimeoutBeforeRestart)
         var delay = configuration.initialDiscoveryDelay
 
         do {
@@ -1056,12 +1040,15 @@ actor PlaybackCoordinator {
                 // Retry within the bounded recovery window.
             }
 
+            let fastPolling = receiverWasRestarted && snapshot.isPlaying && clock.now < fastPollingDeadline
             do {
-                try await Task.sleep(for: delay)
+                try await Task.sleep(for: fastPolling ? configuration.restartedReceiverPollInterval : delay)
             } catch {
                 return
             }
-            delay = min(delay * 2, configuration.maximumDiscoveryDelay)
+            if !fastPolling {
+                delay = min(delay * 2, configuration.maximumDiscoveryDelay)
+            }
         }
     }
 
@@ -1078,19 +1065,10 @@ actor PlaybackCoordinator {
         }
     }
 
-    private func optimisticallySetProgress(_ value: Int) {
-        serverPlayback?.progressMS = value
-        serverPlaybackTimestamp = clock.now
-        eventBus.send(.stateChanged(serverPlayback))
-    }
-
-    private func optimisticallySetVolume(_ value: Int) {
-        serverPlayback?.device?.volumePercent = value
-        eventBus.send(.stateChanged(serverPlayback))
-    }
-
     private func runReconciliationLoop() async {
         while !Task.isCancelled {
+            var interval = observationActivity == .active
+                ? configuration.activeRefreshInterval : configuration.backgroundRefreshInterval
             do {
                 // Track changes continue while the window is hidden. Without these samples,
                 // reconnect recovery can replay a track from many songs ago.
@@ -1100,12 +1078,18 @@ actor PlaybackCoordinator {
                 }
             } catch is CancellationError {
                 return
+            } catch SpotifyAPIError.rateLimited(let retryAfter, _) {
+                // Honor Spotify's back-off instead of polling into the limit again.
+                interval = max(interval, retryAfter.map { Duration.seconds($0) } ?? configuration.rateLimitedRefreshDelay)
+                DiagnosticLog.shared.record("playback.rate_limited", ["retry_after": String(describing: interval)])
+            } catch SpotifyAPIError.quotaExceeded {
+                interval = max(interval, configuration.quotaExceededRefreshDelay)
+                DiagnosticLog.shared.record("playback.quota_exceeded")
             } catch {
                 reportFailure(error)
             }
             do {
-                try await Task.sleep(for: observationActivity == .active
-                    ? configuration.activeRefreshInterval : configuration.backgroundRefreshInterval)
+                try await Task.sleep(for: interval)
             } catch {
                 return
             }

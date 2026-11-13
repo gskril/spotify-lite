@@ -18,6 +18,11 @@ final class DiagnosticLog: @unchecked Sendable {
     private let archives: Int
     private let session = UUID().uuidString
     private var sequence = 0 // Accessed only on queue.
+    private let encoder: JSONEncoder = { // Used only on queue.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        return encoder
+    }()
     private let fallback = Logger(subsystem: "app.spotifylite.SpotifyLite", category: "diagnostics")
 
     init(directory: URL = SpotifydSupervisorConfiguration.defaultApplicationSupportDirectory
@@ -35,7 +40,7 @@ final class DiagnosticLog: @unchecked Sendable {
                 sequence += 1
                 let row = Record(timestamp: timestamp, session: session, sequence: sequence,
                                  event: event, fields: clean)
-                var data = try JSONEncoder().encode(row)
+                var data = try encoder.encode(row)
                 data.append(0x0A)
                 let fm = FileManager.default
                 try fm.createDirectory(at: directory, withIntermediateDirectories: true,

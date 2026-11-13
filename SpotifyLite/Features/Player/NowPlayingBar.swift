@@ -468,16 +468,28 @@ struct ExpandedPlayerView: View {
             }
             HStack(spacing: 28) {
                 Button { environment.setShuffle(environment.playback?.shuffle != true) } label: { Image(systemName: environment.playback?.shuffle == true ? "shuffle.circle.fill" : "shuffle") }
+                    .accessibilityLabel(environment.playback?.shuffle == true ? "Turn shuffle off" : "Turn shuffle on")
+                    .help("Shuffle")
                 Button { environment.skipPrevious() } label: { Image(systemName: "backward.fill") }
+                    .accessibilityLabel("Previous")
+                    .help("Previous")
                 Button { environment.togglePlayback() } label: { Image(systemName: environment.playback?.isPlaying == true ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 42)) }
+                    .accessibilityLabel(environment.playback?.isPlaying == true ? "Pause" : "Play")
+                    .help(environment.playback?.isPlaying == true ? "Pause" : "Play")
                 Button { environment.skipNext() } label: { Image(systemName: "forward.fill") }
+                    .accessibilityLabel("Next")
+                    .help("Next")
                 Button { environment.cycleRepeat() } label: { Image(systemName: repeatSymbol) }
+                    .accessibilityLabel("Repeat")
+                    .accessibilityValue((environment.playback?.repeatMode ?? .off).rawValue)
+                    .help("Repeat")
             }
             .buttonStyle(.plain)
             .font(.title3)
             HStack {
                 Image(systemName: "speaker.fill")
                 Slider(value: $volume, in: 0...100) { editing in if !editing { environment.setVolume(Int(volume)) } }
+                    .accessibilityLabel("Volume")
                 Image(systemName: "speaker.wave.3.fill")
             }
             .foregroundStyle(.secondary)

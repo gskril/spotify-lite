@@ -167,11 +167,13 @@ actor SpotifyAuthorizer: SpotifyAuthorizing {
     }
 
     private func refresh(using existingTokens: OAuthTokens) async throws -> String {
+        // Resolve the client ID before checking for an in-flight refresh: no suspension may
+        // sit between that check and storing the new task, or two callers both refresh.
+        let clientID = try await normalizedClientID()
         if let refreshTask {
             return try await refreshTask.task.value.accessToken
         }
 
-        let clientID = try await normalizedClientID()
         let id = UUID()
         let endpoint = configuration.tokenEndpoint
         let session = session

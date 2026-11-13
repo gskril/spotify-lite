@@ -917,7 +917,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
             "playback",
             "transfer:speaker:true",
             "devices",
-            "devices",
             "next:speaker"
         ])
         XCTAssertEqual(playback?.device?.id, "speaker")
@@ -1170,7 +1169,6 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     func setRepeat(_ mode: RepeatMode, on deviceID: String?) async throws { await recordOperation("repeat:\(mode.rawValue):\(deviceID ?? "nil")") }
     func addToQueue(uri: String, on deviceID: String?) async throws { await recordOperation("queue:\(uri):\(deviceID ?? "nil")") }
     func search(_ query: String, types: Set<SearchType>) async throws -> SearchResults { .init() }
-    func setSaved(trackID: String, saved: Bool) async throws {}
 
     private func recordOperation(_ value: String) async {
         calls.append(value)
@@ -1197,8 +1195,6 @@ private extension PlaybackCoordinatorConfiguration {
         receiverActivationTimeout: Duration = .seconds(8),
         initialDiscoveryDelay: Duration = .milliseconds(250),
         maximumDiscoveryDelay: Duration = .seconds(2),
-        seekDebounceDelay: Duration = .milliseconds(180),
-        volumeDebounceDelay: Duration = .milliseconds(180),
         activeRefreshInterval: Duration = .seconds(3),
         refreshAfterCommands: Bool = true
     ) {
@@ -1207,8 +1203,6 @@ private extension PlaybackCoordinatorConfiguration {
         self.receiverActivationTimeout = receiverActivationTimeout
         self.initialDiscoveryDelay = initialDiscoveryDelay
         self.maximumDiscoveryDelay = maximumDiscoveryDelay
-        self.seekDebounceDelay = seekDebounceDelay
-        self.volumeDebounceDelay = volumeDebounceDelay
         self.activeRefreshInterval = activeRefreshInterval
         self.refreshAfterCommands = refreshAfterCommands
     }

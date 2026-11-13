@@ -287,7 +287,7 @@ struct HomeView: View {
         case .running: "Choose music to connect it to Spotify and start playback."
         case .notInstalled: "One quick Settings step enables lightweight local playback."
         case .needsAuthentication: "Spotify Web API is connected; authenticate spotifyd once to hear audio."
-        case .crashed: "Open Settings for the error and a quick retry."
+        case .crashed: "Open Settings to restart the receiver."
         case .starting: "This usually takes a few seconds."
         case .stopped: "Start it now, or Spotify Lite will start it when you play a song."
         }
