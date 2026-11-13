@@ -83,12 +83,12 @@ struct HomeView: View {
     }
 
     private var shouldShowReceiverPrompt: Bool {
-        if case .running = environment.spotifydState { return false }
+        if case .running = environment.receiverState { return false }
         return true
     }
 
     @ViewBuilder private var receiverAction: some View {
-        switch environment.spotifydState {
+        switch environment.receiverState {
         case .stopped:
             Button("Start Receiver", systemImage: "play.fill") { startReceiver() }
                 .buttonStyle(.bordered)
@@ -261,32 +261,32 @@ struct HomeView: View {
     }
 
     private var receiverSymbol: String {
-        if case .running = environment.spotifydState { return "hifispeaker.fill" }
+        if case .running = environment.receiverState { return "hifispeaker.fill" }
         return "hifispeaker"
     }
 
     private var receiverColor: Color {
-        if case .running = environment.spotifydState { return AppTheme.accent }
-        if case .crashed = environment.spotifydState { return .red }
+        if case .running = environment.receiverState { return AppTheme.accent }
+        if case .crashed = environment.receiverState { return .red }
         return .secondary
     }
 
     private var receiverTitle: String {
-        switch environment.spotifydState {
+        switch environment.receiverState {
         case .running: "Local receiver is ready"
         case .starting: "Starting local receiver…"
         case .notInstalled: "Install the local receiver"
-        case .needsAuthentication: "Finish receiver sign-in"
+        case .needsAuthentication: "Finish receiver setup"
         case .crashed: "Receiver needs attention"
         case .stopped: "Local receiver is off"
         }
     }
 
     private var receiverMessage: String {
-        switch environment.spotifydState {
+        switch environment.receiverState {
         case .running: "Choose music to connect it to Spotify and start playback."
-        case .notInstalled: "One quick Settings step enables lightweight local playback."
-        case .needsAuthentication: "Spotify Web API is connected; authenticate spotifyd once to hear audio."
+        case .notInstalled: "Download Spotify Soloist from Settings to enable local playback."
+        case .needsAuthentication: "Your account is connected. Finish the short receiver setup in Settings to hear audio on this Mac."
         case .crashed: "Open Settings to restart the receiver."
         case .starting: "This usually takes a few seconds."
         case .stopped: "Start it now, or Spotify Lite will start it when you play a song."
@@ -321,8 +321,8 @@ struct HomeView: View {
     private func startReceiver() {
         Task {
             do { try await environment.startReceiver() }
-            catch SpotifydSupervisorError.authenticationRequired {
-                // The receiver card already prompts for authentication.
+            catch SoloistSupervisorError.authenticationRequired, SoloistSupervisorError.apiKeyRequired {
+                // The receiver card already prompts for setup.
             }
             catch { environment.report(error) }
         }

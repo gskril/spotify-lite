@@ -92,8 +92,10 @@ struct RootView: View {
             }
             Task {
                 do { try await environment.startReceiver() }
-                catch SpotifydSupervisorError.authenticationRequired {
-                    // The receiver state already prompts for authentication.
+                catch SoloistSupervisorError.authenticationRequired,
+                      SoloistSupervisorError.apiKeyRequired,
+                      SoloistSupervisorError.notInstalled {
+                    // The receiver state already prompts for setup; no alert at launch.
                 } catch { environment.report(error) }
             }
         }
@@ -133,7 +135,7 @@ struct RootView: View {
                 .listStyle(.sidebar)
 
                 HStack(spacing: 8) {
-                    Circle().fill(environment.spotifydState.indicatorColor).frame(width: 8, height: 8)
+                    Circle().fill(environment.receiverState.indicatorColor).frame(width: 8, height: 8)
                     Text(receiverLabel).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                 }
@@ -164,11 +166,11 @@ struct RootView: View {
     }
 
     private var receiverLabel: String {
-        switch environment.spotifydState {
+        switch environment.receiverState {
         case .running: "Receiver running"
         case .starting: "Receiver starting"
         case .notInstalled: "Receiver not installed"
-        case .needsAuthentication: "Receiver needs sign-in"
+        case .needsAuthentication: "Receiver needs setup"
         case .crashed: "Receiver error"
         case .stopped: "Receiver stopped"
         }

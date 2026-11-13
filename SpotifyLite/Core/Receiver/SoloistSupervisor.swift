@@ -1,35 +1,44 @@
 import Foundation
 
-enum SpotifydSupervisorError: LocalizedError, Sendable, Equatable {
+enum SoloistSupervisorError: LocalizedError, Sendable, Equatable {
     case notInstalled
     case invalidExecutable(String)
     case busy
+    case apiKeyRequired
     case authenticationRequired
+    case buildExpired
     case configuration(String)
     case launch(String)
     case authenticationFailed(status: Int32)
+    case pairingTimedOut
 
     var errorDescription: String? {
         switch self {
         case .notInstalled:
-            "spotifyd was not found. Install it with `brew install spotifyd`, then choose Recheck in Settings."
+            "Spotify Soloist was not found. Download it from Spotify, place it where Settings shows, then choose Recheck."
         case .invalidExecutable(let path):
-            "The selected spotifyd executable is not runnable: \(path)"
+            "The Soloist executable is not runnable: \(path)"
         case .busy:
-            "spotifyd is already running or authenticating."
+            "Soloist is already running or pairing."
+        case .apiKeyRequired:
+            "Add your Spotify Soloist API key in Settings before playing music."
         case .authenticationRequired:
-            "Authenticate the local receiver in Settings before playing music."
+            "Pair the local receiver in Settings before playing music."
+        case .buildExpired:
+            "This Soloist build has expired. Download the current build from Spotify and replace the old one."
         case .configuration(let message):
-            "Could not prepare spotifyd: \(message)"
+            "Could not prepare Soloist: \(message)"
         case .launch(let message):
-            "Could not launch spotifyd: \(message)"
+            "Could not launch Soloist: \(message)"
         case .authenticationFailed(let status):
-            "spotifyd authentication exited with status \(status)."
+            "Soloist pairing exited with status \(status)."
+        case .pairingTimedOut:
+            "Pairing timed out. Open Spotify on this network, choose this Mac's Spotify Lite device, and try again."
         }
     }
 }
 
-actor SpotifydSupervisor: SpotifydManaging {
+actor SoloistSupervisor: ReceiverManaging {
     private enum OutputSource: String {
         case standardOutput = "stdout"
         case standardError = "stderr"
@@ -43,8 +52,8 @@ actor SpotifydSupervisor: SpotifydManaging {
         let isAuthentication: Bool
     }
 
-    private let eventBus = BroadcastStream<SpotifydEvent>(bufferSize: 256)
-    private var configuration: SpotifydSupervisorConfiguration
+    private let eventBus = BroadcastStream<ReceiverEvent>(bufferSize: 256)
+    private var configuration: SoloistSupervisorConfiguration
     private var discoveredExecutableURL: URL?
     private var child: RunningChild?
     private var outputBuffers: [OutputSource: Data] = [:]
@@ -53,27 +62,32 @@ actor SpotifydSupervisor: SpotifydManaging {
     private var keepAliveRequested = false
     private var keepAliveRestartTask: Task<Void, Never>?
     private var audioOutputObservationTask: Task<Void, Never>?
+    private var pairingAdvertisement: Process?
+    private let apiKey: @Sendable () async -> String?
     private let defaultAudioOutputChanges: @Sendable () -> AsyncStream<Void>
 
-    nonisolated var events: AsyncStream<SpotifydEvent> { eventBus.stream() }
+    nonisolated var events: AsyncStream<ReceiverEvent> { eventBus.stream() }
 
     init(
-        configuration: SpotifydSupervisorConfiguration = .init(),
+        configuration: SoloistSupervisorConfiguration = .init(),
+        apiKey: @escaping @Sendable () async -> String? = { SoloistAPIKeyStore.load() },
         defaultAudioOutputChanges: @escaping @Sendable () -> AsyncStream<Void> = {
-            SpotifydAudioOutput.defaultDeviceChanges()
+            ReceiverAudioOutput.defaultDeviceChanges()
         }
     ) {
         self.configuration = configuration
+        self.apiKey = apiKey
         self.defaultAudioOutputChanges = defaultAudioOutputChanges
     }
 
     func recentLogLines() -> [String] { logTail }
 
-    func inspectInstallation() async -> SpotifydInstallation {
+    func inspectInstallation() async -> ReceiverInstallation {
         let candidates = [
             configuration.userSelectedExecutableURL,
-            URL(fileURLWithPath: "/opt/homebrew/bin/spotifyd"),
-            URL(fileURLWithPath: "/usr/local/bin/spotifyd")
+            configuration.installDirectory.appendingPathComponent("soloist"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/soloist"),
+            URL(fileURLWithPath: "/usr/local/bin/soloist")
         ].compactMap { $0 }
 
         for candidate in candidates {
@@ -84,10 +98,14 @@ actor SpotifydSupervisor: SpotifydManaging {
                 let version = firstNonemptyLine(in: result.output)
                 discoveredExecutableURL = candidate
                 if child?.process.isRunning != true {
-                    let state: SpotifydState = credentialsLikelyExist() ? .stopped : .needsAuthentication
+                    let state: ReceiverState = sessionLikelyExists() ? .stopped : .needsAuthentication
                     eventBus.send(.stateChanged(state))
                 }
-                return SpotifydInstallation(executableURL: candidate, version: version)
+                return ReceiverInstallation(
+                    executableURL: candidate,
+                    version: version,
+                    buildExpiry: version.flatMap(Self.buildExpiry(fromVersionLine:))
+                )
             } catch {
                 continue
             }
@@ -95,51 +113,69 @@ actor SpotifydSupervisor: SpotifydManaging {
 
         discoveredExecutableURL = nil
         eventBus.send(.stateChanged(.notInstalled))
-        return SpotifydInstallation(executableURL: nil, version: nil)
+        return ReceiverInstallation(executableURL: nil, version: nil)
     }
 
+    /// Pairs through Spotify Connect: Soloist waits until the user picks this device in a
+    /// Spotify app on the local network, stores the session, and exits.
     func authenticate() async throws {
         if child?.process.isRunning == true {
-            guard child?.isAuthentication != true else { throw SpotifydSupervisorError.busy }
+            guard child?.isAuthentication != true else { throw SoloistSupervisorError.busy }
             await stop()
         }
         let executable = try await requireExecutable()
         try prepareApplicationSupport()
+        let key = try await requireAPIKey()
 
-        let help = (try? runShortCommand(executable: executable, arguments: ["--help"]).output) ?? ""
-        let subcommand = authenticationSubcommand(from: help)
-        appendLog("Starting spotifyd \(subcommand) flow")
+        appendLog("Starting Soloist pairing")
+        // Verbose output is the only place Soloist reports its pairing port. It also names
+        // the account, so pairing output is scanned for that port and never stored.
         let launched = try launch(
             executable: executable,
-            arguments: [subcommand, "--config-path", configuration.configFile.path],
+            arguments: baseArguments(apiKey: key) + ["--pair", "--verbose"],
             isAuthentication: true
         )
         child = launched
         stopWasRequested = false
+        defer { stopPairingAdvertisement() }
 
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: configuration.pairingTimeout)
+        var timedOut = false
         while launched.process.isRunning {
-            try Task.checkCancellation()
-            try await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled || clock.now >= deadline {
+                timedOut = !Task.isCancelled
+                launched.process.terminate()
+                await waitForExit(of: launched.process, for: configuration.gracefulStopDelay)
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(100))
         }
-        flushOutputBuffers(for: launched.identifier)
         let status = launched.process.terminationStatus
         clearHandlers(on: launched)
+        outputBuffers.removeAll()
         if child?.identifier == launched.identifier { child = nil }
 
-        guard status == 0 else {
+        if timedOut {
             eventBus.send(.stateChanged(.needsAuthentication))
-            throw SpotifydSupervisorError.authenticationFailed(status: status)
+            throw SoloistSupervisorError.pairingTimedOut
         }
-        guard credentialsLikelyExist() else {
+        try Task.checkCancellation()
+        if status == SoloistSupervisorConfiguration.expiredBuildExitStatus {
+            eventBus.send(.stateChanged(.crashed(status: status)))
+            throw SoloistSupervisorError.buildExpired
+        }
+        guard status == 0, sessionLikelyExists() else {
             eventBus.send(.stateChanged(.needsAuthentication))
-            throw SpotifydSupervisorError.authenticationFailed(status: status)
+            throw SoloistSupervisorError.authenticationFailed(status: status)
         }
+        appendLog("Soloist pairing completed")
         eventBus.send(.stateChanged(.stopped))
     }
 
     func start() async throws {
         if let child, child.process.isRunning {
-            if child.isAuthentication { throw SpotifydSupervisorError.busy }
+            if child.isAuthentication { throw SoloistSupervisorError.busy }
             return
         }
 
@@ -150,9 +186,18 @@ actor SpotifydSupervisor: SpotifydManaging {
             eventBus.send(.stateChanged(.crashed(status: -1)))
             throw error
         }
-        guard credentialsLikelyExist() else {
+        guard let key = await apiKey() else {
             eventBus.send(.stateChanged(.needsAuthentication))
-            throw SpotifydSupervisorError.authenticationRequired
+            throw SoloistSupervisorError.apiKeyRequired
+        }
+        guard sessionLikelyExists() else {
+            eventBus.send(.stateChanged(.needsAuthentication))
+            throw SoloistSupervisorError.authenticationRequired
+        }
+        // Another caller may have launched the receiver while the key was being read.
+        if let child, child.process.isRunning {
+            if child.isAuthentication { throw SoloistSupervisorError.busy }
+            return
         }
         stopWasRequested = false
         eventBus.send(.stateChanged(.starting))
@@ -160,7 +205,7 @@ actor SpotifydSupervisor: SpotifydManaging {
         do {
             let launched = try launch(
                 executable: executable,
-                arguments: ["--no-daemon", "--config-path", configuration.configFile.path],
+                arguments: baseArguments(apiKey: key),
                 isAuthentication: false
             )
             child = launched
@@ -185,6 +230,7 @@ actor SpotifydSupervisor: SpotifydManaging {
     }
 
     func stop() async {
+        stopPairingAdvertisement()
         stopObservingDefaultAudioOutput()
         guard let running = child else {
             eventBus.send(.stateChanged(.stopped))
@@ -216,9 +262,30 @@ actor SpotifydSupervisor: SpotifydManaging {
         }
         let installation = await inspectInstallation()
         guard let executable = installation.executableURL else {
-            throw SpotifydSupervisorError.notInstalled
+            throw SoloistSupervisorError.notInstalled
         }
         return executable
+    }
+
+    private func requireAPIKey() async throws -> String {
+        guard let key = await apiKey() else {
+            eventBus.send(.stateChanged(.needsAuthentication))
+            throw SoloistSupervisorError.apiKeyRequired
+        }
+        return key
+    }
+
+    /// Soloist accepts the API key only as an argument, so it is visible to other processes
+    /// of this user while the receiver runs. It is never logged.
+    private func baseArguments(apiKey: String) -> [String] {
+        [
+            "--device-name", configuration.deviceName,
+            "--api-key", apiKey,
+            "--data-dir", configuration.dataDirectory.path,
+            "--cache-dir", configuration.cacheDirectory.path,
+            "--cache-size", String(configuration.maxCacheSizeMB),
+            "--initial-volume", String(SoloistSupervisorConfiguration.rememberedVolume)
+        ]
     }
 
     private func prepareApplicationSupport() throws {
@@ -226,15 +293,9 @@ actor SpotifydSupervisor: SpotifydManaging {
             try createPrivateDirectory(configuration.applicationSupportDirectory)
             try createPrivateDirectory(configuration.cacheDirectory)
             try createPrivateDirectory(configuration.logDirectory)
-            let contents = SpotifydConfigurationFile.render(
-                deviceName: configuration.deviceName,
-                cacheDirectory: configuration.cacheDirectory,
-                maxCacheSizeBytes: configuration.maxCacheSizeBytes
-            )
-            try Data(contents.utf8).write(to: configuration.configFile, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configuration.configFile.path)
+            try createPrivateDirectory(configuration.dataDirectory)
         } catch {
-            throw SpotifydSupervisorError.configuration(safeDescription(of: error))
+            throw SoloistSupervisorError.configuration(safeDescription(of: error))
         }
     }
 
@@ -249,7 +310,7 @@ actor SpotifydSupervisor: SpotifydManaging {
 
     private func launch(executable: URL, arguments: [String], isAuthentication: Bool) throws -> RunningChild {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw SpotifydSupervisorError.invalidExecutable(executable.path)
+            throw SoloistSupervisorError.invalidExecutable(executable.path)
         }
 
         let identifier = UUID()
@@ -276,7 +337,7 @@ actor SpotifydSupervisor: SpotifydManaging {
             standardOutput.fileHandleForReading.readabilityHandler = nil
             standardError.fileHandleForReading.readabilityHandler = nil
             process.terminationHandler = nil
-            throw SpotifydSupervisorError.launch(safeDescription(of: error))
+            throw SoloistSupervisorError.launch(safeDescription(of: error))
         }
 
         return RunningChild(
@@ -310,10 +371,10 @@ actor SpotifydSupervisor: SpotifydManaging {
         while let newline = buffer.firstIndex(of: 0x0A) {
             let lineData = buffer[..<newline]
             buffer.removeSubrange(...newline)
-            appendLog("[\(source.rawValue)] \(String(decoding: lineData, as: UTF8.self))")
+            handleOutputLine(String(decoding: lineData, as: UTF8.self), from: source)
         }
         if buffer.count > 16_384 {
-            appendLog("[\(source.rawValue)] \(String(decoding: buffer.prefix(16_384), as: UTF8.self))")
+            handleOutputLine(String(decoding: buffer.prefix(16_384), as: UTF8.self), from: source)
             buffer.removeAll(keepingCapacity: true)
         }
         outputBuffers[source] = buffer
@@ -322,7 +383,60 @@ actor SpotifydSupervisor: SpotifydManaging {
     private func flushBuffer(_ source: OutputSource) {
         let data = outputBuffers.removeValue(forKey: source) ?? Data()
         guard !data.isEmpty else { return }
-        appendLog("[\(source.rawValue)] \(String(decoding: data, as: UTF8.self))")
+        handleOutputLine(String(decoding: data, as: UTF8.self), from: source)
+    }
+
+    private func handleOutputLine(_ line: String, from source: OutputSource) {
+        guard child?.isAuthentication == true else {
+            appendLog("[\(source.rawValue)] \(line)")
+            return
+        }
+        if pairingAdvertisement == nil, let endpoint = Self.pairingEndpoint(in: line) {
+            startPairingAdvertisement(port: endpoint.port, path: endpoint.path)
+        }
+    }
+
+    /// Soloist's verbose log line announcing its Spotify Connect pairing endpoint.
+    nonisolated static func pairingEndpoint(in line: String) -> (port: Int, path: String)? {
+        guard let match = line.firstMatch(of: /Started ZeroConf service on port (\d+) path (\/[A-Za-z0-9_\/-]*)/),
+              let port = Int(match.1), (1...65_535).contains(port) else { return nil }
+        return (port, String(match.2))
+    }
+
+    /// Soloist reports its build date as `(yyyyMMdd)` in `--version`; builds stop working
+    /// `buildLifetimeDays` later.
+    nonisolated static func buildExpiry(fromVersionLine line: String) -> Date? {
+        guard let match = line.firstMatch(of: /\((\d{4})(\d{2})(\d{2})\)/) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let components = DateComponents(year: Int(match.1), month: Int(match.2), day: Int(match.3))
+        guard let built = calendar.date(from: components) else { return nil }
+        return calendar.date(byAdding: .day, value: SoloistSupervisorConfiguration.buildLifetimeDays, to: built)
+    }
+
+    /// Advertises the pairing endpoint through the system Bonjour service. Soloist's own
+    /// multicast announcement does not reliably reach the network from a child process.
+    private func startPairingAdvertisement(port: Int, path: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/dns-sd")
+        process.arguments = [
+            "-R", configuration.deviceName, "_spotify-connect._tcp", "local.", String(port),
+            "CPath=\(path)", "VERSION=1.0", "Stack=SP"
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            pairingAdvertisement = process
+            appendLog("Advertising Soloist pairing on the local network")
+        } catch {
+            appendLog("Could not advertise Soloist pairing: \(safeDescription(of: error))")
+        }
+    }
+
+    private func stopPairingAdvertisement() {
+        if pairingAdvertisement?.isRunning == true { pairingAdvertisement?.terminate() }
+        pairingAdvertisement = nil
     }
 
     private func flushOutputBuffers(for identifier: UUID) {
@@ -332,7 +446,7 @@ actor SpotifydSupervisor: SpotifydManaging {
     }
 
     private func appendLog(_ unsafeLine: String) {
-        // spotifyd colors its log levels; the escape codes are noise in files and the UI.
+        // Strip terminal color codes; they are noise in files and the UI.
         let line = Redaction.redact(unsafeLine)
             .replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
         DiagnosticLog.shared.record("receiver.log", ["message": line])
@@ -341,29 +455,24 @@ actor SpotifydSupervisor: SpotifydManaging {
             logTail.removeFirst(logTail.count - configuration.logTailLineLimit)
         }
         eventBus.send(.log(line))
-        if !stopWasRequested,
-           child?.isAuthentication != true,
-           Self.isConnectionInterruption(line) {
-            if keepAliveRequested {
-                // Tell playback recovery to hold its current snapshot while the supervisor
-                // refreshes the stale Connect session in the background.
-                eventBus.send(.connectionWillRestart)
-                scheduleKeepAliveRestart(forceRestart: true)
-            } else {
-                eventBus.send(.connectionInterrupted(restartReceiver: true))
-            }
+        if !stopWasRequested, child?.isAuthentication == false, line.contains("waiting for login") {
+            // The stored session is gone or was rejected; only pairing again can fix that.
+            Task { [weak self] in await self?.storedSessionWasRejected() }
         }
         appendToRotatingLog(line)
     }
 
-    static func isConnectionInterruption(_ line: String) -> Bool {
-        line.localizedCaseInsensitiveContains("unexpected shutdown")
-            || line.localizedCaseInsensitiveContains("connection to server closed")
+    private func storedSessionWasRejected() async {
+        guard child?.isAuthentication == false else { return }
+        keepAliveRestartTask?.cancel()
+        keepAliveRestartTask = nil
+        await stop()
+        eventBus.send(.stateChanged(.needsAuthentication))
     }
 
     private func appendToRotatingLog(_ line: String) {
-        let logURL = configuration.logDirectory.appendingPathComponent("spotifyd.log")
-        let oldURL = configuration.logDirectory.appendingPathComponent("spotifyd.log.1")
+        let logURL = configuration.logDirectory.appendingPathComponent("soloist.log")
+        let oldURL = configuration.logDirectory.appendingPathComponent("soloist.log.1")
         let size = (try? FileManager.default.attributesOfItem(atPath: logURL.path)[.size] as? NSNumber)?.intValue ?? 0
         if size >= configuration.logFileMaxBytes {
             try? FileManager.default.removeItem(at: oldURL)
@@ -393,9 +502,11 @@ actor SpotifydSupervisor: SpotifydManaging {
         flushOutputBuffers(for: identifier)
         clearHandlers(on: running)
         child = nil
-        if !stopWasRequested, !running.isAuthentication {
+        let expired = status == SoloistSupervisorConfiguration.expiredBuildExitStatus
+        if expired { appendLog("Soloist build has expired; a newer build must be installed") }
+        if !stopWasRequested, !running.isAuthentication, !expired {
             eventBus.send(.connectionInterrupted(restartReceiver: false))
-            scheduleKeepAliveRestart(forceRestart: false)
+            scheduleKeepAliveRestart()
         }
         eventBus.send(.exited(status: status))
         if stopWasRequested {
@@ -413,7 +524,7 @@ actor SpotifydSupervisor: SpotifydManaging {
         child.process.terminationHandler = nil
     }
 
-    private func scheduleKeepAliveRestart(forceRestart: Bool) {
+    private func scheduleKeepAliveRestart() {
         guard keepAliveRequested, keepAliveRestartTask == nil else { return }
         let delay = configuration.keepAliveRestartDelay
         keepAliveRestartTask = Task { [weak self] in
@@ -422,27 +533,15 @@ actor SpotifydSupervisor: SpotifydManaging {
             } catch {
                 return
             }
-            await self?.performKeepAliveRestart(forceRestart: forceRestart)
+            await self?.performKeepAliveRestart()
         }
     }
 
-    private func performKeepAliveRestart(forceRestart: Bool) async {
+    private func performKeepAliveRestart() async {
         keepAliveRestartTask = nil
         guard keepAliveRequested else { return }
-
-        if forceRestart, child?.process.isRunning == true {
-            appendLog("Refreshing stale Spotify Connect receiver session")
-            await stop()
-        }
-        guard keepAliveRequested else { return }
-
         do {
             try await start()
-            // Playback held its pre-interruption snapshot while we stopped the old process.
-            // Only now may it discover the replacement and restore playback.
-            if forceRestart {
-                eventBus.send(.connectionInterrupted(restartReceiver: false))
-            }
         } catch {
             appendLog("Could not keep receiver running: \(safeDescription(of: error))")
         }
@@ -493,20 +592,11 @@ actor SpotifydSupervisor: SpotifydManaging {
         }
     }
 
-    private func credentialsLikelyExist() -> Bool {
-        let candidates = [
-            configuration.cacheDirectory.appendingPathComponent("credentials.json"),
-            configuration.cacheDirectory.appendingPathComponent("oauth/credentials.json")
-        ]
-        return candidates.contains { FileManager.default.fileExists(atPath: $0.path) }
-    }
-
-    private func authenticationSubcommand(from help: String) -> String {
-        let lowered = help.lowercased()
-        if lowered.range(of: #"(?m)^\s*authenticate(?:\s|$)"#, options: .regularExpression) != nil {
-            return "authenticate"
-        }
-        return "auth"
+    /// Soloist writes per-user settings once a Connect session has been stored.
+    private func sessionLikelyExists() -> Bool {
+        let users = configuration.dataDirectory.appendingPathComponent("settings/Users", isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: users.path)) ?? []
+        return !entries.isEmpty
     }
 
     private func runShortCommand(executable: URL, arguments: [String]) throws -> (status: Int32, output: String) {
@@ -522,7 +612,7 @@ actor SpotifydSupervisor: SpotifydManaging {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return (process.terminationStatus, Redaction.redact(String(decoding: data.prefix(64_000), as: UTF8.self)))
         } catch {
-            throw SpotifydSupervisorError.launch(safeDescription(of: error))
+            throw SoloistSupervisorError.launch(safeDescription(of: error))
         }
     }
 

@@ -4,7 +4,7 @@ Spotify Lite has three boundaries:
 
 - The SwiftUI feature layer owns presentation state and user intent.
 - Actor-backed authorization, API, daemon, and playback services own mutable state and side effects behind protocols.
-- The user-installed `spotifyd` executable owns the private playback protocol and audio output.
+- The user-installed Spotify Soloist executable (Spotify's official headless Connect player) owns the playback protocol and audio output.
 
 The Web API never supplies audio bytes. For a selected track or context, the playback coordinator starts the supervised receiver, discovers its current Spotify Connect device ID, and targets the play request directly at that device. Transfer Playback is used when the user picks another device, and to make the already-running local receiver active, without starting playback, before resuming on it.
 

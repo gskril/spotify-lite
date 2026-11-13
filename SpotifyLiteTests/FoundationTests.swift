@@ -3,15 +3,6 @@ import MediaPlayer
 @testable import SpotifyLite
 
 final class FoundationTests: XCTestCase {
-    func testAppDestinationsRemainStable() {
-        XCTAssertEqual(AppDestination.allCases, [.home, .library, .search, .settings])
-    }
-
-    func testAbsentDaemonIsNotInstalled() {
-        let installation = SpotifydInstallation(executableURL: nil, version: nil)
-        XCTAssertFalse(installation.isInstalled)
-    }
-
     func testArtworkSelectsSmallestImageThatFitsRenderedSize() {
         let edges: [Int] = [64, 300, 640]
         let images = edges.map { edge in

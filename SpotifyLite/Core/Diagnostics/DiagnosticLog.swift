@@ -25,7 +25,7 @@ final class DiagnosticLog: @unchecked Sendable {
     }()
     private let fallback = Logger(subsystem: "app.spotifylite.SpotifyLite", category: "diagnostics")
 
-    init(directory: URL = SpotifydSupervisorConfiguration.defaultApplicationSupportDirectory
+    init(directory: URL = SoloistSupervisorConfiguration.defaultApplicationSupportDirectory
         .appendingPathComponent("Logs"), maximumBytes: Int = 4_000_000, archives: Int = 8) {
         self.directory = directory
         self.maximumBytes = max(256, maximumBytes)

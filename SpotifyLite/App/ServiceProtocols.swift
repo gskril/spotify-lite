@@ -40,15 +40,15 @@ extension SpotifyAPIProviding {
     }
 }
 
-/// Events from the receiver supervisor. The supervisor is the only source of `SpotifydState`:
+/// Events from the receiver supervisor. The supervisor is the only source of `ReceiverState`:
 /// it sends `.stateChanged` for every transition, including failures thrown from `start()`.
 ///
 /// Recovery ordering: before the supervisor replaces a stale receiver it sends
 /// `.connectionWillRestart`, so playback holds its snapshot. Once the replacement is running
 /// it sends `.connectionInterrupted(restartReceiver: false)`, and only then does playback
 /// rediscover the receiver and restore.
-enum SpotifydEvent: Sendable, Equatable {
-    case stateChanged(SpotifydState)
+enum ReceiverEvent: Sendable, Equatable {
+    case stateChanged(ReceiverState)
     case log(String)
     case connectionWillRestart
     case connectionInterrupted(restartReceiver: Bool = false)
@@ -56,7 +56,7 @@ enum SpotifydEvent: Sendable, Equatable {
     case exited(status: Int32)
 }
 
-enum SpotifydState: Sendable, Equatable {
+enum ReceiverState: Sendable, Equatable {
     case notInstalled
     case needsAuthentication
     case stopped
@@ -65,15 +65,17 @@ enum SpotifydState: Sendable, Equatable {
     case crashed(status: Int32)
 }
 
-struct SpotifydInstallation: Sendable, Equatable {
+struct ReceiverInstallation: Sendable, Equatable {
     let executableURL: URL?
     let version: String?
+    /// When this receiver build stops working, if the receiver reports a build date.
+    var buildExpiry: Date? = nil
     var isInstalled: Bool { executableURL != nil }
 }
 
-protocol SpotifydManaging: Sendable {
-    var events: AsyncStream<SpotifydEvent> { get }
-    func inspectInstallation() async -> SpotifydInstallation
+protocol ReceiverManaging: Sendable {
+    var events: AsyncStream<ReceiverEvent> { get }
+    func inspectInstallation() async -> ReceiverInstallation
     func authenticate() async throws
     func start() async throws
     func stop() async
@@ -81,7 +83,7 @@ protocol SpotifydManaging: Sendable {
     func stopKeepingAlive() async
 }
 
-extension SpotifydManaging {
+extension ReceiverManaging {
     func startKeepingAlive() async throws { try await start() }
     func stopKeepingAlive() async { await stop() }
 }

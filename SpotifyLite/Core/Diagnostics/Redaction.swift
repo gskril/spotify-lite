@@ -16,10 +16,11 @@ enum Redaction {
             with: "Bearer <redacted>",
             options: .regularExpression
         )
-        // spotifyd and Spotify's pagination URLs name the account outside key=value form.
+        // Receiver log lines and Spotify's pagination URLs name the account outside key=value form.
         for accountName in [
             #"(?i)(Authenticated as )'[^']*'"#,
             #"(?i)(Login via OAuth as user )[^\s.]+"#,
+            #"(?i)(logged in as )\S+"#,
             #"(/v1/users/)[^/\s?]+"#
         ] {
             redacted = redacted.replacingOccurrences(
