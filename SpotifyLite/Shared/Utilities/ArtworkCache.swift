@@ -20,7 +20,7 @@ final class ArtworkCache {
     private let session: URLSession
 
     private init() {
-        decoded.totalCostLimit = 48 * 1024 * 1024
+        decoded.totalCostLimit = 32 * 1024 * 1024
 
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("SpotifyLite/Artwork", isDirectory: true)
