@@ -46,7 +46,10 @@ struct GeneratedMixDetailView: View {
 
     private func playAll() {
         guard let first = tracks.first else { return }
-        environment.playLocally(.uris(tracks.map(\.uri)), preview: first)
+        environment.playLocally(
+            .uris(tracks.map(\.uri)),
+            preview: environment.playback?.shuffle == true ? nil : first
+        )
     }
 
     private func play(_ track: SpotifyTrack, at index: Int) {

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var isWorking = false
     @State private var statusMessage: String?
     @State private var showingSignOut = false
+    @State private var audioOutput = "System default"
 
     var body: some View {
         ScrollView {
@@ -45,7 +46,7 @@ struct SettingsView: View {
 
                     if let installation, installation.isInstalled {
                         LabeledContent("spotifyd", value: installation.version ?? "Installed")
-                        LabeledContent("Audio output", value: SpotifydAudioOutput.statusDescription())
+                        LabeledContent("Audio output", value: audioOutput)
                         if let path = installation.executableURL?.path {
                             Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                         }
@@ -143,6 +144,8 @@ struct SettingsView: View {
     private func inspectAsync() async {
         isWorking = true
         installation = await environment.spotifyd.inspectInstallation()
+        // Walking the CoreAudio device list is too slow to repeat on every redraw.
+        audioOutput = SpotifydAudioOutput.statusDescription()
         isWorking = false
     }
 

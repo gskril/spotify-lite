@@ -51,9 +51,9 @@
 		352DEBEA6A2C724ECF5617C8 = {
 			isa = PBXGroup;
 			children = (
+				B626536F9DD22A9DF8261CA0 /* Resources */,
 				930AACFCA9ECDEADD53C8800 /* SpotifyLite */,
 				6B44C0C9BAE85582E8F8E2E3 /* SpotifyLiteTests */,
-				B626536F9DD22A9DF8261CA0 /* Resources */,
 				68EAEF4DA9206141B9F6D8C6 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -83,6 +83,7 @@
 			buildConfigurationList = BA8E8C18CD17AF1F03FCE45A /* Build configuration list for PBXNativeTarget "SpotifyLiteTests" */;
 			buildPhases = (
 				8E00C3AB8F7E4B0DC7C1963D /* Sources */,
+				5C274C698C023CCE14A8DE3B /* Resources */,
 			);
 			buildRules = (
 			);
@@ -138,7 +139,6 @@
 				};
 			};
 			buildConfigurationList = 57308F187E8B4A7318DB648D /* Build configuration list for PBXProject "SpotifyLite" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -148,6 +148,7 @@
 			mainGroup = 352DEBEA6A2C724ECF5617C8;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 68EAEF4DA9206141B9F6D8C6 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -163,6 +164,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				79387FBEB42DB262775F52C1 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5C274C698C023CCE14A8DE3B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

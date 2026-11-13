@@ -50,7 +50,45 @@ specific transport evidence or a verified upstream fix. Broad receiver debug
 logging should not be enabled casually because it can include sensitive session
 data.
 
+## Follow-up analysis — November 13, 2026
+
+All five log archives (September 15 – November 13) were analysed: 129 receiver
+sessions ended with `Connection to server closed.`, 21 of them while playing.
+
+- **The drops follow the keep-alive, not the network.** Spotify's access point
+  sends a Ping every 120 s and librespot 0.8.0 answers with a Pong 60 s later
+  (`PONG_DELAY` in `core/src/session.rs`). 69 of the 129 closures landed within
+  0.1 s of that Pong (session ages of 180.0 s, 300.0 s, 420.0 s, ...). The line is
+  logged at ERROR level, which is librespot's I/O-error branch: the remote end
+  reset the connection as the Pong was sent.
+- The first Pong of a session (60 s) never failed in 188 sessions; the second
+  (180 s) failed in 21 of 172. Failures cluster in bad periods.
+- **Not the local VPN.** Receiver starts only show the full-tunnel signature
+  (`ResponderRecvPacket ... No route to host`) from November 10; the drop rate
+  per Pong was the same or higher before it.
+- The remaining 60 closures are not Pong-aligned; many follow dealer websocket
+  warnings or long gaps in the log.
+- **The silence is the app's restart, not the drop.** librespot does not check
+  session validity while a loaded track plays, so audio continues until the
+  supervisor terminates the process. Measured on November 12 at 21:57 UTC:
+  process exit 21:57:01.708, replacement track loaded 21:57:03.816 — about 2.1 s.
+  Roughly 0.45 s of that was recovery polling with backoff after the new
+  receiver had already registered.
+
+Change made: recovery now polls every 100 ms for the first 3 s after a receiver
+restart that interrupted playing audio (`restartedReceiverPollInterval`). This
+shortens the gap; it does not remove it. Not yet measured on a live incident.
+
+Not established: why the access point resets at Pong time. An idle-timeout race
+on Spotify's side is a hypothesis only. Testing it means running a receiver
+built with a shorter `PONG_DELAY`, which the plan below rules out for now.
+
 ## Known issue and upstream tracking
+
+Status rechecked November 13, 2026: spotifyd 0.4.2 and librespot 0.8.0 are still
+the latest releases, and librespot PR #1692 was closed without merging on
+November 5, 2026. [librespot #1787](https://github.com/librespot-org/librespot/issues/1787)
+(end dealer subscriptions when the session shuts down) is open.
 
 Status checked September 17, 2026: spotifyd 0.4.2 is the latest published
 release. Keep using the released receiver and the app's automatic recovery;

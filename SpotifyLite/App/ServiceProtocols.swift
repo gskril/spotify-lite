@@ -32,7 +32,6 @@ protocol SpotifyAPIProviding: Sendable {
     func setRepeat(_ mode: RepeatMode, on deviceID: String?) async throws
     func addToQueue(uri: String, on deviceID: String?) async throws
     func search(_ query: String, types: Set<SearchType>) async throws -> SearchResults
-    func setSaved(trackID: String, saved: Bool) async throws
 }
 
 extension SpotifyAPIProviding {

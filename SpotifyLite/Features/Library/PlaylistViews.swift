@@ -88,7 +88,8 @@ struct PlaylistDetailView: View {
                             isStartingPlaylist = true
                             environment.playLocally(
                                 .context(uri: displayedPlaylist.uri),
-                                preview: tracks.first
+                                // With shuffle on Spotify picks the first track itself.
+                                preview: environment.playback?.shuffle == true ? nil : tracks.first
                             )
                             Task {
                                 try? await Task.sleep(for: .milliseconds(700))

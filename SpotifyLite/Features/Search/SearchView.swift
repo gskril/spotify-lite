@@ -38,7 +38,7 @@ struct SearchView: View {
             }
         }
         .onDisappear { searchTask?.cancel() }
-        .onChange(of: environment.searchFocusRequest) { _, _ in searchFieldFocused = true }
+        .onChange(of: environment.searchFocusRequest, initial: true) { _, _ in searchFieldFocused = true }
     }
 
     private var emptySearchPrompt: some View {
@@ -169,7 +169,9 @@ struct SearchView: View {
             isSearching = true
             errorMessage = nil
             do {
-                results = try await environment.api.search(currentQuery, types: Set(SearchType.allCases))
+                let found = try await environment.api.search(currentQuery, types: Set(SearchType.allCases))
+                guard !Task.isCancelled else { return }
+                results = found
             } catch is CancellationError {
                 return
             } catch {

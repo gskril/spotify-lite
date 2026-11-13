@@ -6,12 +6,16 @@ struct RootView: View {
     @AppStorage(SpotifyLitePreferences.clientIDKey) private var clientID = ""
     @AppStorage(SpotifyLitePreferences.premiumConfirmedKey) private var premiumConfirmed = false
     @State private var didBootstrap = false
+    @State private var isBootstrapping = true
 
     var body: some View {
         ZStack {
             Group {
                 if case .ready(let user) = environment.sessionState {
                     mainApp(user: user)
+                } else if isBootstrapping {
+                    // Avoid flashing onboarding while the saved session is checked.
+                    LoadingView(message: "Opening Spotify Lite…")
                 } else {
                     OnboardingView(environment: environment)
                 }
@@ -173,6 +177,7 @@ struct RootView: View {
     private func bootstrapIfPossible() async {
         // The unit-test host must not authenticate the real account or launch a competing receiver.
         guard !Bundle.allBundles.contains(where: { $0.bundleURL.pathExtension == "xctest" }) else { return }
+        defer { isBootstrapping = false }
         guard !didBootstrap else { return }
         didBootstrap = true
         guard premiumConfirmed, !clientID.isEmpty else { return }

@@ -332,7 +332,9 @@ actor SpotifydSupervisor: SpotifydManaging {
     }
 
     private func appendLog(_ unsafeLine: String) {
+        // spotifyd colors its log levels; the escape codes are noise in files and the UI.
         let line = Redaction.redact(unsafeLine)
+            .replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
         DiagnosticLog.shared.record("receiver.log", ["message": line])
         logTail.append(line)
         if logTail.count > configuration.logTailLineLimit {

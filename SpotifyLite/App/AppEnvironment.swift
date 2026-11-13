@@ -233,7 +233,8 @@ final class AppEnvironment: ObservableObject {
             switch event {
             case .stateChanged(let state):
                 if isStartingPlayback, state == nil { continue }
-                playback = state
+                // Publishing an unchanged poll redraws every view and rewrites Now Playing.
+                if playback != state { playback = state }
             case .receiverChanged(let device):
                 if let device, playback != nil {
                     playback?.device = device
