@@ -46,16 +46,28 @@ actor SpotifyAPIClient: SpotifyAPIProviding {
         )
     }
 
-    func mostRecentlyPlayed() async throws -> SpotifyTrack? {
+    func mostRecentlyPlayed() async throws -> RecentlyPlayedTrack? {
         let page = try await decode(
-            SpotifyPage<LossTolerant<TrackItem>>.self,
+            SpotifyPage<LossTolerant<PlayHistoryItem>>.self,
             from: Endpoint(
                 method: "GET",
                 path: "me/player/recently-played",
                 query: [URLQueryItem(name: "limit", value: "1")]
             )
         )
-        return page.items.first?.value?.track
+        guard let item = page.items.first?.value, let track = item.track else { return nil }
+        return RecentlyPlayedTrack(
+            track: track,
+            // An unreadable timestamp ranks the entry as older than anything played locally.
+            playedAt: item.playedAt.flatMap(Self.parseTimestamp) ?? .distantPast,
+            contextURI: item.context?.uri
+        )
+    }
+
+    /// Spotify sends `played_at` as ISO 8601, usually with milliseconds.
+    private static func parseTimestamp(_ value: String) -> Date? {
+        (try? Date(value, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+            ?? (try? Date(value, strategy: .iso8601))
     }
 
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> {
@@ -514,6 +526,22 @@ private struct SpotifyPage<Item: Decodable & Sendable>: Decodable, Sendable {
 /// A recently played or saved track entry: both wrap the track in a `track` field.
 private struct TrackItem: Decodable, Sendable {
     let track: SpotifyTrack?
+}
+
+private struct PlayHistoryItem: Decodable, Sendable {
+    struct Context: Decodable, Sendable {
+        let uri: String?
+    }
+
+    let track: SpotifyTrack?
+    let playedAt: String?
+    let context: Context?
+
+    enum CodingKeys: String, CodingKey {
+        case track
+        case playedAt = "played_at"
+        case context
+    }
 }
 
 private struct SavedAlbumItem: Decodable, Sendable {

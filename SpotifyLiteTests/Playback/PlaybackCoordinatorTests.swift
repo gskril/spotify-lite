@@ -152,13 +152,15 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, ["playback"])
     }
 
-    func testStartupPrefersLocallyRememberedTrackOverLaggingAccountHistory() async throws {
+    func testStartupPrefersLocallyRememberedTrackOverOlderAccountHistory() async throws {
         let local = makeTrack(id: "local", name: "Played before quitting")
         let staleHistory = makeTrack(id: "stale", name: "Older account history")
+        let savedAt = Date(timeIntervalSince1970: 2_000)
         let api = PlaybackAPISpy(
             deviceResponses: [],
             playbackResponses: [nil],
-            recentlyPlayedTracks: [staleHistory]
+            recentlyPlayedTracks: [staleHistory],
+            mostRecentPlayedAt: savedAt.addingTimeInterval(-60)
         )
         let coordinator = PlaybackCoordinator(
             api: api,
@@ -175,7 +177,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         )
 
         let hydrated = try await coordinator.hydrateFromAccountHistory(
-            rememberedPlayback: remembered
+            remembered: RememberedPlayback(playback: remembered, savedAt: savedAt)
         )
 
         XCTAssertEqual(hydrated?.item, local)
@@ -185,7 +187,97 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(hydrated?.shuffle, true)
         XCTAssertEqual(hydrated?.repeatMode, .context)
         let calls = await api.calls
-        XCTAssertEqual(calls, ["playback"])
+        XCTAssertEqual(calls, ["playback", "recently-played"])
+    }
+
+    func testStartupPrefersNewerAccountHistoryOverLocallyRememberedTrack() async throws {
+        let local = makeTrack(id: "local", name: "Played in Spotify Lite")
+        let newer = makeTrack(id: "newer", name: "Played on phone later")
+        let savedAt = Date(timeIntervalSince1970: 2_000)
+        let api = PlaybackAPISpy(
+            deviceResponses: [],
+            playbackResponses: [nil],
+            recentlyPlayedTracks: [newer],
+            mostRecentPlayedAt: savedAt.addingTimeInterval(600)
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            receiverManager: ReceiverManagerSpy(),
+            receiverName: "Spotify Lite — Test Mac"
+        )
+        let remembered = PlaybackState(
+            item: local, progressMS: 42_000, isPlaying: false, device: nil,
+            shuffle: true, repeatMode: .context
+        )
+
+        let hydrated = try await coordinator.hydrateFromAccountHistory(
+            remembered: RememberedPlayback(playback: remembered, savedAt: savedAt)
+        )
+
+        XCTAssertEqual(hydrated?.item, newer)
+        XCTAssertEqual(hydrated?.progressMS, 0)
+        XCTAssertEqual(hydrated?.isPlaying, false)
+    }
+
+    func testStartupKeepsRememberedTrackWhenHistoryFails() async throws {
+        let local = makeTrack(id: "local", name: "Played in Spotify Lite")
+        let api = PlaybackAPISpy(
+            deviceResponses: [],
+            playbackResponses: [nil],
+            historyError: .http(status: 500, reason: nil, message: "Unavailable")
+        )
+        let coordinator = PlaybackCoordinator(
+            api: api,
+            receiverManager: ReceiverManagerSpy(),
+            receiverName: "Spotify Lite — Test Mac"
+        )
+        let remembered = PlaybackState(
+            item: local, progressMS: 42_000, isPlaying: false, device: nil,
+            shuffle: false, repeatMode: .off
+        )
+
+        let hydrated = try await coordinator.hydrateFromAccountHistory(
+            remembered: RememberedPlayback(playback: remembered, savedAt: nil)
+        )
+
+        XCTAssertEqual(hydrated?.item, local)
+        XCTAssertEqual(hydrated?.progressMS, 42_000)
+    }
+
+    func testStartupPlaybackChoosesBetweenRememberedTrackAndHistory() {
+        let local = makeTrack(id: "local", name: "Local")
+        let other = makeTrack(id: "other", name: "Other")
+        let savedAt = Date(timeIntervalSince1970: 2_000)
+        let remembered = RememberedPlayback(
+            playback: PlaybackState(item: local, progressMS: 30_000, isPlaying: false,
+                device: nil, shuffle: true, repeatMode: .track, contextURI: "spotify:playlist:local"),
+            savedAt: savedAt
+        )
+        let laterSameTrack = RecentlyPlayedTrack(track: local, playedAt: savedAt.addingTimeInterval(5))
+        let laterOther = RecentlyPlayedTrack(
+            track: other,
+            playedAt: savedAt.addingTimeInterval(5),
+            contextURI: "spotify:album:other"
+        )
+
+        // The same track finishing slightly later keeps the local position.
+        XCTAssertEqual(
+            PlaybackCoordinator.startupPlayback(remembered: remembered, history: laterSameTrack)?.progressMS,
+            30_000
+        )
+        // A newer different track wins and keeps its listening context.
+        let fromHistory = PlaybackCoordinator.startupPlayback(remembered: remembered, history: laterOther)
+        XCTAssertEqual(fromHistory?.item, other)
+        XCTAssertEqual(fromHistory?.contextURI, "spotify:album:other")
+        XCTAssertEqual(fromHistory?.shuffle, false)
+        // A record saved before timestamps existed defers to history.
+        var undated = remembered
+        undated.savedAt = nil
+        let olderOther = RecentlyPlayedTrack(track: other, playedAt: .distantPast)
+        XCTAssertEqual(PlaybackCoordinator.startupPlayback(remembered: undated, history: olderOther)?.item, other)
+        // Without history the remembered track is used; without either there is nothing.
+        XCTAssertEqual(PlaybackCoordinator.startupPlayback(remembered: remembered, history: nil)?.item, local)
+        XCTAssertNil(PlaybackCoordinator.startupPlayback(remembered: nil, history: nil))
     }
 
     func testReceiverInterruptionRestartsExactTrackAtLastPositionAtomically() async throws {
@@ -1092,6 +1184,8 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     private let operationDelay: Duration
     private let pauseError: SpotifyAPIError?
     private let recentlyPlayedTracks: [SpotifyTrack]
+    private let mostRecentPlayedAt: Date
+    private let historyError: SpotifyAPIError?
     private(set) var calls: [String] = []
     private(set) var activeOperations = 0
     private(set) var maximumConcurrentOperations = 0
@@ -1100,9 +1194,13 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
         deviceResponses: [[SpotifyDevice]],
         playbackResponses: [PlaybackState?] = [],
         recentlyPlayedTracks: [SpotifyTrack] = [],
+        mostRecentPlayedAt: Date = Date(),
+        historyError: SpotifyAPIError? = nil,
         operationDelay: Duration = .zero,
         pauseError: SpotifyAPIError? = nil
     ) {
+        self.mostRecentPlayedAt = mostRecentPlayedAt
+        self.historyError = historyError
         self.deviceResponses = deviceResponses
         self.playbackResponses = playbackResponses
         self.recentlyPlayedTracks = recentlyPlayedTracks
@@ -1114,6 +1212,13 @@ private actor PlaybackAPISpy: SpotifyAPIProviding {
     func recentlyPlayed() async throws -> [SpotifyTrack] {
         calls.append("recently-played")
         return recentlyPlayedTracks
+    }
+    func mostRecentlyPlayed() async throws -> RecentlyPlayedTrack? {
+        calls.append("recently-played")
+        if let historyError { throw historyError }
+        return recentlyPlayedTracks.first.map {
+            RecentlyPlayedTrack(track: $0, playedAt: mostRecentPlayedAt)
+        }
     }
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary] { [] }
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack> { Page(items: [], next: nil) }

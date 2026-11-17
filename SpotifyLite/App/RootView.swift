@@ -81,7 +81,7 @@ struct RootView: View {
             Task {
                 do {
                     environment.playback = try await environment.playbackCoordinator.hydrateFromAccountHistory(
-                        rememberedPlayback: environment.rememberedPlayback(for: user.id)
+                        remembered: environment.rememberedPlayback(for: user.id)
                     )
                 } catch {
                     // Playback history is helpful startup state, not a reason to block the app.

@@ -137,11 +137,12 @@ actor PlaybackCoordinator {
     }
 
     /// Hydrates the player when an authenticated session becomes ready. Spotify returns no
-    /// playback object when every device is idle, so prefer the app's last known track before
-    /// consulting account history, which Spotify may update after a delay.
+    /// playback object when every device is idle. Then the newer of the app's last known track
+    /// and the account's listening history wins, so a track played in another Spotify app
+    /// since Spotify Lite was last used is not hidden by an older local one.
     @discardableResult
     func hydrateFromAccountHistory(
-        rememberedPlayback: PlaybackState? = nil
+        remembered: RememberedPlayback? = nil
     ) async throws -> PlaybackState? {
         if let state = try await api.playbackState() {
             setPlayback(state)
@@ -152,23 +153,48 @@ actor PlaybackCoordinator {
         }
 
         if serverPlayback?.item != nil { return currentPlayback() }
-        if var remembered = rememberedPlayback, remembered.item != nil {
-            remembered.isPlaying = false
-            remembered.device = nil
-            setPlayback(remembered)
-            return remembered
+        let usableRemembered = remembered?.playback.item == nil ? nil : remembered
+        let history: RecentlyPlayedTrack?
+        do {
+            history = try await api.mostRecentlyPlayed()
+        } catch {
+            // History only refines a remembered track; without one it is the only source.
+            guard usableRemembered != nil else { throw error }
+            history = nil
         }
-        guard let track = try await api.mostRecentlyPlayed() else { return nil }
-        let remembered = PlaybackState(
-            item: track,
+        guard let startup = Self.startupPlayback(remembered: usableRemembered, history: history) else {
+            return nil
+        }
+        setPlayback(startup)
+        return startup
+    }
+
+    /// Chooses the paused player shown at launch when no device is active. Pure, so the
+    /// ordering rules can be tested without timing.
+    nonisolated static func startupPlayback(
+        remembered: RememberedPlayback?,
+        history: RecentlyPlayedTrack?
+    ) -> PlaybackState? {
+        var local = remembered?.playback
+        local?.isPlaying = false
+        local?.device = nil
+        if local?.item == nil { local = nil }
+
+        guard let history else { return local }
+        if let local {
+            // The same track: keep the local copy, which knows the position and settings.
+            if local.item?.uri == history.track.uri { return local }
+            if let savedAt = remembered?.savedAt, savedAt >= history.playedAt { return local }
+        }
+        return PlaybackState(
+            item: history.track,
             progressMS: 0,
             isPlaying: false,
             device: nil,
             shuffle: false,
-            repeatMode: .off
+            repeatMode: .off,
+            contextURI: history.contextURI
         )
-        setPlayback(remembered)
-        return remembered
     }
 
     @discardableResult

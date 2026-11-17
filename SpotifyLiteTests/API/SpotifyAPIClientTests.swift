@@ -140,6 +140,20 @@ final class SpotifyAPIClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.last?.url?.query, "offset=2")
     }
 
+    func testMostRecentlyPlayedReadsPlayedAtAndContext() async throws {
+        let body = #"{"items":[{"track":{"id":"one","name":"One","uri":"spotify:track:one","duration_ms":100,"explicit":false,"artists":[]},"played_at":"2026-11-17T08:30:15.123Z","context":{"uri":"spotify:playlist:mix"}}],"next":null}"#
+        let recorder = APIRequestRecorder(responses: [.init(status: 200, body: body)])
+        APIURLProtocolStub.handler = { try recorder.respond(to: $0) }
+        let api = makeAPI(authorizer: APIMockAuthorizer(token: "token"))
+
+        let recent = try await api.mostRecentlyPlayed()
+
+        XCTAssertEqual(recent?.track.id, "one")
+        XCTAssertEqual(recent?.contextURI, "spotify:playlist:mix")
+        XCTAssertEqual(recent?.playedAt.timeIntervalSince1970 ?? 0, 1_794_904_215.123, accuracy: 0.001)
+        XCTAssertEqual(recorder.requests.first?.url?.query, "limit=1")
+    }
+
     func testSavedTracksPageReturnsImmediatelyWithoutFollowingNext() async throws {
         let pageOne = #"{"items":[{"track":{"id":"one","name":"One","uri":"spotify:track:one","duration_ms":100,"explicit":false,"artists":[]}}],"next":"https://unit.test/v1/me/tracks?offset=50"}"#
         let pageTwo = #"{"items":[{"track":{"id":"two","name":"Two","uri":"spotify:track:two","duration_ms":200,"explicit":false,"artists":[]}}],"next":null}"#

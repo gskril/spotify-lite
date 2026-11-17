@@ -70,7 +70,7 @@ final class AppEnvironment: ObservableObject {
         self.playbackMemoryStore = playbackMemoryStore
     }
 
-    func rememberedPlayback(for accountID: String) -> PlaybackState? {
+    func rememberedPlayback(for accountID: String) -> RememberedPlayback? {
         playbackMemoryStore.load(for: accountID)
     }
 

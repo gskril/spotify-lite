@@ -18,7 +18,7 @@ This is an experimental personal, noncommercial project. It is not affiliated wi
 - Home and Library keep their loaded data for the session: revisiting within 15 minutes needs no request, and older data stays visible while it refreshes.
 - Artwork is decoded once at its displayed size and kept in a bounded memory cache, so scrolling back or switching views does not refetch it.
 - Five-second playback reconciliation while active, and fifteen-second reconciliation during local background playback so recovery retains a recent track. Idle background sessions do not poll. Progress is interpolated locally.
-- Startup restores Spotify's current session, or shows Spotify Lite's last known track as paused when no device has an active session. Account history is used only when the app has not remembered a track yet.
+- Startup restores Spotify's current session. When no device has an active session, it shows a paused track: whichever is newer, Spotify Lite's last known track (with its position) or the newest entry in the account's listening history.
 - Lightweight, session-long supervision of one app-owned Soloist child process with a private data directory, relaunch after unexpected exits, bounded redacted logs, and graceful shutdown.
 
 The app is source-built and unsigned. It is not currently packaged, notarized, or distributed as a finished consumer application.

@@ -178,6 +178,15 @@ struct PlaybackState: Sendable, Equatable {
     }
 }
 
+/// The newest entry in the account's listening history. Spotify records a track there only
+/// after it has played for at least 30 seconds, so a track paused partway through may be
+/// missing.
+struct RecentlyPlayedTrack: Sendable, Equatable {
+    let track: SpotifyTrack
+    let playedAt: Date
+    var contextURI: String? = nil
+}
+
 struct PlaybackQueue: Sendable, Equatable {
     let currentlyPlaying: SpotifyTrack?
     let upcoming: [SpotifyTrack]

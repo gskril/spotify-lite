@@ -63,7 +63,7 @@ final class FoundationTests: XCTestCase {
 
         store.save(playback, for: "account-a")
 
-        let restored = store.load(for: "account-a")
+        let restored = store.load(for: "account-a")?.playback
         XCTAssertEqual(restored?.item, track)
         XCTAssertEqual(restored?.progressMS, 27_000)
         XCTAssertEqual(restored?.isPlaying, false)
@@ -75,6 +75,35 @@ final class FoundationTests: XCTestCase {
 
         store.clear()
         XCTAssertNil(store.load(for: "account-a"))
+    }
+
+    func testPlaybackMemoryTimestampAdvancesOnlyWhilePlayingOrWhenTheTrackChanges() {
+        let suiteName = "PlaybackMemoryStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = PlaybackMemoryStore(defaults: defaults, key: "fixture")
+        func track(_ id: String) -> SpotifyTrack {
+            SpotifyTrack(id: id, name: id, uri: "spotify:track:\(id)", durationMS: 180_000,
+                         explicit: false, artists: [], album: nil)
+        }
+        func state(_ id: String, playing: Bool) -> PlaybackState {
+            PlaybackState(item: track(id), progressMS: 1_000, isPlaying: playing, device: nil,
+                          shuffle: false, repeatMode: .off)
+        }
+        let first = Date(timeIntervalSince1970: 1_000)
+        let later = Date(timeIntervalSince1970: 5_000)
+
+        store.save(state("a", playing: true), for: "account", now: first)
+        // Restoring the same paused track at a later launch must not make it look newer.
+        store.save(state("a", playing: false), for: "account", now: later)
+        XCTAssertEqual(store.load(for: "account")?.savedAt, first)
+
+        store.save(state("a", playing: true), for: "account", now: later)
+        XCTAssertEqual(store.load(for: "account")?.savedAt, later)
+
+        let changed = Date(timeIntervalSince1970: 9_000)
+        store.save(state("b", playing: false), for: "account", now: changed)
+        XCTAssertEqual(store.load(for: "account")?.savedAt, changed)
     }
 
     @MainActor

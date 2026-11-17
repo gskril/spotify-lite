@@ -12,7 +12,7 @@ protocol SpotifyAuthorizing: Sendable {
 protocol SpotifyAPIProviding: Sendable {
     func currentUser() async throws -> SpotifyUser
     func recentlyPlayed() async throws -> [SpotifyTrack]
-    func mostRecentlyPlayed() async throws -> SpotifyTrack?
+    func mostRecentlyPlayed() async throws -> RecentlyPlayedTrack?
     func currentUserPlaylists() async throws -> [SpotifyPlaylistSummary]
     func savedTracksPage(after next: URL?) async throws -> Page<SpotifyTrack>
     func savedAlbumsPage(after next: URL?) async throws -> Page<SpotifyAlbumSummary>
@@ -32,12 +32,6 @@ protocol SpotifyAPIProviding: Sendable {
     func setRepeat(_ mode: RepeatMode, on deviceID: String?) async throws
     func addToQueue(uri: String, on deviceID: String?) async throws
     func search(_ query: String, types: Set<SearchType>) async throws -> SearchResults
-}
-
-extension SpotifyAPIProviding {
-    func mostRecentlyPlayed() async throws -> SpotifyTrack? {
-        try await recentlyPlayed().first
-    }
 }
 
 /// Events from the receiver supervisor. The supervisor is the only source of `ReceiverState`:
